@@ -1,0 +1,157 @@
+/* =========================================================================
+   BarberPro SaaS – Admin Styles
+   ========================================================================= */
+.barberpro-admin { max-width: 100%; box-sizing: border-box; overflow: visible; }
+.barberpro-admin .nav-tab-wrapper { 
+    display: flex; 
+    flex-wrap: wrap;
+    gap: 0;
+    border-bottom: 1px solid #c3c4c7;
+    margin-bottom: 0;
+    margin-left: 0;
+}
+.barberpro-admin .nav-tab-wrapper .nav-tab {
+    margin: 0 2px 0 0;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.barberpro-date { color: #6b7280; font-size: .9rem; margin-top: -6px; }
+
+/* KPIs */
+.barberpro-kpis { display: flex; flex-wrap: wrap; gap: 16px; margin: 20px 0; }
+.kpi-card {
+  background: #fff; border-radius: 12px; padding: 20px 24px;
+  border-left: 4px solid #3b82f6; flex: 1 1 180px; min-width: 160px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+.kpi-card h3 { margin: 0 0 8px; font-size: .85rem; color: #6b7280; text-transform: uppercase; letter-spacing: .5px; }
+.kpi-value { font-size: 1.6rem; font-weight: 700; color: #1a1a2e; margin: 0; }
+.kpi-red  { border-left-color: #ef4444; }
+.kpi-green { border-left-color: #10b981; }
+.kpi-icon { float: right; font-size: 1.4rem; color: #9ca3af; }
+
+/* Charts */
+.barberpro-chart-wrap { background: #fff; border-radius: 12px; padding: 24px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.barberpro-chart-wrap h2 { margin-top: 0; font-size: 1rem; }
+
+/* Tables */
+.barberpro-table-wrap { margin: 20px 0; }
+.barberpro-table-wrap h2 { font-size: 1rem; margin-bottom: 10px; }
+
+/* Badges */
+.barberpro-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 20px;
+  font-size: .75rem; font-weight: 700; text-transform: uppercase;
+}
+.status-agendado       { background: #dbeafe; color: #1d4ed8; }
+.status-confirmado     { background: #ede9fe; color: #6d28d9; }
+.status-em_atendimento { background: #fef3c7; color: #b45309; }
+.status-finalizado     { background: #d1fae5; color: #065f46; }
+.status-cancelado      { background: #fee2e2; color: #991b1b; }
+.status-recusado       { background: #fee2e2; color: #991b1b; }
+
+/* Kanban */
+.barberpro-kanban {
+  display: flex; gap: 16px; overflow-x: auto; padding-bottom: 12px; min-height: 500px;
+}
+.kanban-column {
+  min-width: 240px; width: 240px; background: #f8f9fa;
+  border-radius: 10px; flex-shrink: 0;
+}
+.kanban-column-header {
+  padding: 14px 16px; display: flex; justify-content: space-between; align-items: center;
+  background: #fff; border-radius: 10px 10px 0 0; font-weight: 600;
+}
+.kanban-column-header h3 { margin: 0; font-size: .9rem; }
+.kanban-count {
+  background: #e5e7eb; border-radius: 20px; padding: 2px 8px;
+  font-size: .75rem; color: #4b5563;
+}
+.kanban-cards { padding: 8px; min-height: 400px; }
+.kanban-card {
+  background: #fff; border-radius: 8px; padding: 12px;
+  margin-bottom: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  cursor: grab; transition: box-shadow .2s;
+}
+.kanban-card:active { cursor: grabbing; box-shadow: 0 6px 20px rgba(0,0,0,.15); }
+.kanban-card.dragging { opacity: .5; }
+.kanban-column.drag-over .kanban-cards { background: #e0f2fe; border-radius: 0 0 10px 10px; }
+.kanban-card-time { font-size: .75rem; color: #6b7280; margin-bottom: 4px; }
+.kanban-card-client strong { font-size: .9rem; }
+.kanban-card-service { font-size: .8rem; color: #3b82f6; margin: 2px 0; }
+.kanban-card-pro, .kanban-card-phone { font-size: .78rem; color: #6b7280; }
+.kanban-card-code { font-size: .7rem; color: #9ca3af; margin-top: 6px; font-family: monospace; }
+
+/* Professionals Grid */
+.barberpro-pro-grid { display: flex; flex-wrap: wrap; gap: 16px; margin: 20px 0; }
+.barberpro-pro-card {
+  background: #fff; border-radius: 12px; padding: 20px; text-align: center;
+  width: 180px; box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+.barberpro-pro-card img { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; margin-bottom: 8px; }
+.pro-avatar {
+  width: 72px; height: 72px; border-radius: 50%; background: #e94560; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.8rem; font-weight: 700; margin: 0 auto 8px;
+}
+.barberpro-pro-card h3 { margin: 0 0 4px; font-size: .95rem; }
+.pro-specialty, .pro-commission { font-size: .8rem; color: #6b7280; margin: 2px 0; }
+.pro-rating { font-size: .85rem; }
+
+/* Modal */
+.barberpro-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  z-index: 99999; display: flex; align-items: center; justify-content: center;
+}
+.barberpro-modal-content {
+  background: #fff; border-radius: 12px; padding: 32px;
+  max-width: 620px; width: 90%; max-height: 90vh; overflow-y: auto;
+  position: relative;
+}
+.barberpro-modal-close {
+  position: absolute; top: 16px; right: 20px;
+  font-size: 1.4rem; cursor: pointer; color: #6b7280;
+}
+.barberpro-modal-close:hover { color: #ef4444; }
+
+/* Filters */
+.barberpro-filters { margin: 12px 0 16px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.barberpro-filters input, .barberpro-filters select { border-radius: 6px !important; }
+
+/* Settings Tabs */
+.barberpro-tab-content { background: #fff; border: 1px solid #e0e0e0; border-top: none; padding: 24px; border-radius: 0 0 8px 8px; }
+
+/* ── Sticky Save Bar ── */
+.bp-sticky-save {
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+    border-top: 2px solid #e5e7eb;
+    padding: 14px 24px;
+    margin: 24px 0 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 100;
+    box-shadow: 0 -4px 12px rgba(0,0,0,.08);
+    border-radius: 0 0 8px 8px;
+}
+.bp-sticky-save .button-primary {
+    font-size: .95rem;
+    padding: 8px 24px;
+    height: auto;
+    border-radius: 8px;
+}
+.bp-save-hint {
+    font-size: .82rem;
+    color: #6b7280;
+}
+
+/* ── Tabs compactas ── */
+.barberpro-admin .nav-tab-wrapper .nav-tab {
+    font-size: .82rem;
+    padding: 6px 10px;
+    margin: 0 1px 0 0;
+    white-space: nowrap;
+    flex-shrink: 0;
+}

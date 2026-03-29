@@ -1,0 +1,133 @@
+/* BarberPro PWA — Install Banner CSS */
+
+/* ── Banner Android ── */
+.bp-pwa-banner {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 999998;
+    padding: 0 0 env(safe-area-inset-bottom, 0);
+    background: #fff;
+    box-shadow: 0 -4px 24px rgba(0,0,0,.15);
+    border-top: 1px solid #e5e7eb;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    transform: translateY(100%);
+    transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+}
+.bp-pwa-banner.bp-pwa-slide-in {
+    transform: translateY(0);
+}
+.bp-pwa-banner-inner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    max-width: 480px;
+    margin: 0 auto;
+}
+.bp-pwa-icon {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    flex-shrink: 0;
+    object-fit: cover;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+.bp-pwa-icon-placeholder {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    background: #1a1a2e;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem;
+    flex-shrink: 0;
+}
+.bp-pwa-info { flex: 1; min-width: 0; }
+.bp-pwa-app-name {
+    font-size: .92rem;
+    font-weight: 700;
+    color: #111;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bp-pwa-app-sub {
+    font-size: .75rem;
+    color: #6b7280;
+    margin-top: 2px;
+}
+.bp-pwa-btn-install {
+    background: #1a1a2e;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: .85rem;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .15s;
+}
+.bp-pwa-btn-install:hover { background: #0f3460; }
+.bp-pwa-btn-close {
+    background: none;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 4px;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.bp-pwa-btn-close:hover { color: #374151; }
+
+/* ── Dica iOS ── */
+.bp-pwa-ios-tip {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 999998;
+    background: #1a1a2e;
+    color: #fff;
+    padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0));
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-shadow: 0 -4px 24px rgba(0,0,0,.3);
+    transform: translateY(100%);
+    transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+}
+.bp-pwa-ios-tip.bp-pwa-slide-in {
+    transform: translateY(0);
+}
+.bp-pwa-ios-inner {
+    max-width: 480px;
+    margin: 0 auto;
+    position: relative;
+}
+.bp-pwa-ios-text {
+    font-size: .88rem;
+    line-height: 1.6;
+    color: rgba(255,255,255,.9);
+    padding-right: 28px;
+}
+.bp-pwa-ios-text strong { color: #fff; font-weight: 700; }
+.bp-pwa-ios-arrow {
+    text-align: center;
+    font-size: .8rem;
+    color: rgba(255,255,255,.5);
+    margin-top: 8px;
+    animation: bpPwaArrow 1.2s ease-in-out infinite;
+}
+@keyframes bpPwaArrow {
+    0%,100% { transform: translateY(0); opacity:.5; }
+    50%      { transform: translateY(4px); opacity:1; }
+}
+.bp-pwa-ios-tip .bp-pwa-btn-close {
+    position: absolute;
+    top: 0; right: 0;
+    color: rgba(255,255,255,.6);
+    font-size: .9rem;
+}
+.bp-pwa-ios-tip .bp-pwa-btn-close:hover { color: #fff; }
+
+/* ── Slide out animation ── */
+.bp-pwa-banner.bp-pwa-slide-out,
+.bp-pwa-ios-tip.bp-pwa-slide-out {
+    transform: translateY(100%);
+    transition: transform .3s ease-in;
+}
