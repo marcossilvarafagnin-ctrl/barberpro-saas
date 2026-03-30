@@ -226,7 +226,7 @@ class BarberPro_Database {
             'client_phone'    => sanitize_text_field( $data['client_phone'] ),
             'client_email'    => sanitize_email( $data['client_email'] ?? '' ),
             'booking_date'    => sanitize_text_field( $data['booking_date'] ),
-            'booking_time'    => sanitize_text_field( $data['booking_time'] ),
+            'booking_time'    => self::normalize_booking_time_db( (string) ( $data['booking_time'] ?? '' ) ),
             'status'          => sanitize_key( $data['status'] ?? 'agendado' ),
             'payment_method'  => sanitize_key( $data['payment_method'] ?? 'presencial' ),
             'payment_status'  => 'pendente',
@@ -309,9 +309,31 @@ class BarberPro_Database {
         return $wpdb->get_results( $wpdb->prepare( $sql, $params ) ) ?: [];
     }
 
+    /**
+     * Normaliza horário para chave H:i (comparação com slots gerados).
+     */
+    public static function normalize_booking_time_key( string $time ): string {
+        $time = trim( $time );
+        if ( preg_match( '/^(\d{1,2}):(\d{2})(?::(\d{2}))?/', $time, $m ) ) {
+            return sprintf( '%02d:%02d', (int) $m[1], (int) $m[2] );
+        }
+        return $time;
+    }
+
+    /**
+     * Normaliza para coluna TIME do MySQL (H:i:s).
+     */
+    public static function normalize_booking_time_db( string $time ): string {
+        $k = self::normalize_booking_time_key( $time );
+        if ( preg_match( '/^(\d{2}):(\d{2})$/', $k, $m ) ) {
+            return $m[1] . ':' . $m[2] . ':00';
+        }
+        return '00:00:00';
+    }
+
     public static function get_booked_slots( int $professional_id, string $date ): array {
         global $wpdb;
-        return $wpdb->get_col(
+        $raw = $wpdb->get_col(
             $wpdb->prepare(
                 "SELECT booking_time FROM {$wpdb->prefix}barber_bookings
                  WHERE professional_id = %d AND booking_date = %s
@@ -319,6 +341,7 @@ class BarberPro_Database {
                 $professional_id, $date
             )
         ) ?: [];
+        return array_map( [ __CLASS__, 'normalize_booking_time_key' ], $raw );
     }
 
     // ─── FINANCE (helpers básicos) ──────────────────────────────────────────

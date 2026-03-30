@@ -1181,7 +1181,18 @@ trait BP_Actions_Operations {
         if ( $message === '' ) {
             wp_send_json_error( ['message' => 'Digite a mensagem.'] );
         }
-        $ids = isset( $_POST['client_ids'] ) ? array_map( 'absint', (array) $_POST['client_ids'] ) : [];
+        $ids = [];
+        if ( ! empty( $_POST['client_ids'] ) ) {
+            $raw = wp_unslash( $_POST['client_ids'] );
+            if ( is_string( $raw ) ) {
+                $dec = json_decode( $raw, true );
+                if ( is_array( $dec ) ) {
+                    $ids = array_map( 'absint', $dec );
+                }
+            } elseif ( is_array( $raw ) ) {
+                $ids = array_map( 'absint', $raw );
+            }
+        }
         $list = BarberPro_Clients::list( $company_id, '', '' );
         if ( $ids ) {
             $list = array_values( array_filter( $list, static function ( $c ) use ( $ids ) {

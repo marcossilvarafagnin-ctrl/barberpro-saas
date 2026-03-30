@@ -16,6 +16,14 @@ if ( ! defined('ABSPATH') ) exit;
 
 class BarberPro_Widget_Chat {
 
+    /** company_id real do módulo (nunca assumir 1/2 fixos). */
+    private static function cid_for_modulo( string $mod_key ): int {
+        if ( $mod_key === 'lavacar' ) {
+            return BarberPro_Modules::company_id( 'lavacar' );
+        }
+        return BarberPro_Modules::company_id( 'barbearia' );
+    }
+
     // ── Registro de hooks ────────────────────────────────────────
     public static function init(): void {
         if ( BarberPro_Database::get_setting('widget_chat_ativo','0') !== '1' ) return;
@@ -308,7 +316,7 @@ class BarberPro_Widget_Chat {
                 $mod_key = array_key_first($mods) ?: 'barbearia';
             }
             $e_try['modulo'] = $mod_key;
-            $cid             = $mod_key === 'barbearia' ? 1 : 2;
+            $cid             = self::cid_for_modulo( $mod_key );
             $sid             = (int) ($e_try['service_id'] ?? 0);
             if ( $sid <= 0 ) {
                 $servicos = BarberPro_Database::get_services($cid);
@@ -473,7 +481,7 @@ class BarberPro_Widget_Chat {
     }
 
     private static function etapa_servico( string $session, string $msg, array $e ): array {
-        $cid      = $e['modulo'] === 'barbearia' ? 1 : 2;
+        $cid      = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $servicos = BarberPro_Database::get_services($cid);
         $idx      = self::detectar_numero_ou_nome($msg, array_column($servicos,'name'));
         if ( $idx === null ) {
@@ -494,7 +502,7 @@ class BarberPro_Widget_Chat {
     }
 
     private static function etapa_profissional( string $session, string $msg, array $e ): array {
-        $cid  = $e['modulo'] === 'barbearia' ? 1 : 2;
+        $cid  = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $pros = BarberPro_Database::get_professionals($cid);
         $ml   = mb_strtolower(trim($msg));
 
@@ -811,17 +819,25 @@ class BarberPro_Widget_Chat {
 
     // ── Criar agendamento ────────────────────────────────────────
     private static function criar_agendamento( array $e ): array {
-        $cid    = $e['modulo'] === 'barbearia' ? 1 : 2;
+        $cid    = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $pro_id = (int)$e['pro_id'];
 
         if ( $pro_id === 0 ) {
-            $svc = BarberPro_Database::get_service((int)$e['service_id']);
-            $dur = (int)($svc->duration_minutes ?? $svc->duration ?? 30);
-            foreach (BarberPro_Database::get_professionals($cid) as $p) {
-                $slots = BarberPro_Bookings::get_available_slots((int)$p->id, $e['data'], $dur, false);
-                if (in_array($e['horario'], $slots, true)) { $pro_id = (int)$p->id; break; }
+            $svc  = BarberPro_Database::get_service( (int) $e['service_id'] );
+            $dur  = (int) ( $svc->duration_minutes ?? $svc->duration ?? 30 );
+            $want = BarberPro_Database::normalize_booking_time_key( (string) ( $e['horario'] ?? '' ) );
+            foreach ( BarberPro_Database::get_professionals( $cid ) as $p ) {
+                $slots = BarberPro_Bookings::get_available_slots( (int) $p->id, $e['data'], $dur, false );
+                foreach ( $slots as $s ) {
+                    if ( BarberPro_Database::normalize_booking_time_key( $s ) === $want ) {
+                        $pro_id = (int) $p->id;
+                        break 2;
+                    }
+                }
             }
-            if (!$pro_id) return ['success'=>false,'message'=>'Nenhum profissional disponível neste horário.'];
+            if ( ! $pro_id ) {
+                return [ 'success' => false, 'message' => 'Nenhum profissional disponível neste horário.' ];
+            }
         }
 
         return BarberPro_Bookings::create_booking([
@@ -934,7 +950,7 @@ class BarberPro_Widget_Chat {
     }
 
     private static function resposta_servicos( array $e ): array {
-        $cid      = $e['modulo']==='barbearia' ? 1 : 2;
+        $cid      = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $servicos = BarberPro_Database::get_services($cid);
         $msg      = "Qual serviço você quer? ✂️\n\n";
         $qr       = [];
@@ -1036,7 +1052,7 @@ class BarberPro_Widget_Chat {
 
     // ── Helpers ──────────────────────────────────────────────────
     private static function buscar_slots( array $e, string $data ): array {
-        $cid    = $e['modulo']==='barbearia' ? 1 : 2;
+        $cid    = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $pro_id = (int)$e['pro_id'];
         $svc    = BarberPro_Database::get_service((int)$e['service_id']);
         $dur    = (int)($svc->duration_minutes??$svc->duration??30);
@@ -1063,7 +1079,7 @@ class BarberPro_Widget_Chat {
 
             $linhas = [];
             foreach ( $modulos as $mod_key => $mod_nome ) {
-                $cid      = $mod_key === 'barbearia' ? 1 : 2;
+                $cid      = self::cid_for_modulo( $mod_key );
                 $servicos = BarberPro_Database::get_services($cid);
                 $pros     = BarberPro_Database::get_professionals($cid);
                 if ( empty($servicos) || empty($pros) ) continue;

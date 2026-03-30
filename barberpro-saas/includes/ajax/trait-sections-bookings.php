@@ -8,9 +8,11 @@ trait BP_Sections_Bookings {
         $today   = current_time('Y-m-d');
         $date    = sanitize_text_field($_POST['date'] ?? $_GET['date'] ?? $today);
         $periodo = sanitize_key($_POST['periodo'] ?? 'dia');
-        $mod     = $company_id===1?'barbearia':'lavacar';
-        $mod_name = BarberPro_Database::get_setting("module_{$mod}_name", $company_id===1?'Barbearia':'Lava-Car');
-        $icon    = $company_id===1?'✂️':'🚗';
+        $cid_bar = BarberPro_Modules::company_id( 'barbearia' );
+        $cid_lav = BarberPro_Modules::company_id( 'lavacar' );
+        $mod     = $company_id === $cid_lav ? 'lavacar' : 'barbearia';
+        $mod_name = BarberPro_Database::get_setting( "module_{$mod}_name", $mod === 'lavacar' ? 'Lava-Car' : 'Barbearia' );
+        $icon    = $mod === 'lavacar' ? '🚗' : '✂️';
 
         // Calcula intervalo conforme período
         switch ($periodo) {
@@ -130,9 +132,11 @@ trait BP_Sections_Bookings {
     // ── Kanban ────────────────────────────────────────────────────
     private function section_kanban( int $company_id ): void {
         global $wpdb;
-        $mod = $company_id===1?'barbearia':'lavacar';
-        $mod_name = BarberPro_Database::get_setting("module_{$mod}_name", $company_id===1?'Barbearia':'Lava-Car');
-        $icon = $company_id===1?'✂️':'🚗';
+        $cid_bar = BarberPro_Modules::company_id( 'barbearia' );
+        $cid_lav = BarberPro_Modules::company_id( 'lavacar' );
+        $mod     = $company_id === $cid_lav ? 'lavacar' : 'barbearia';
+        $mod_name = BarberPro_Database::get_setting( "module_{$mod}_name", $mod === 'lavacar' ? 'Lava-Car' : 'Barbearia' );
+        $icon    = $mod === 'lavacar' ? '🚗' : '✂️';
         $today = current_time('Y-m-d');
         $kanban_date = sanitize_text_field( wp_unslash( $_POST['kanban_date'] ?? '' ) );
         if ( ! $kanban_date || ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $kanban_date ) ) {
@@ -233,9 +237,9 @@ trait BP_Sections_Bookings {
 
     // ── Serviços ──────────────────────────────────────────────────
     private function section_servicos( int $company_id ): void {
-        $mod = $company_id===1?'barbearia':'lavacar';
-        $mod_name = BarberPro_Database::get_setting("module_{$mod}_name", $company_id===1?'Barbearia':'Lava-Car');
-        $mod = $company_id===1?'barbearia':'lavacar';
+        $cid_lav  = BarberPro_Modules::company_id( 'lavacar' );
+        $mod      = $company_id === $cid_lav ? 'lavacar' : 'barbearia';
+        $mod_name = BarberPro_Database::get_setting( "module_{$mod}_name", $mod === 'lavacar' ? 'Lava-Car' : 'Barbearia' );
         $services = BarberPro_Database::get_services($company_id, true); // true = mostrar ativos + inativos
         ?>
         <div class="bp-page-header bp-animate-in">
@@ -280,10 +284,11 @@ trait BP_Sections_Bookings {
 
     // ── Profissionais ─────────────────────────────────────────────
     private function section_profissionais( int $company_id ): void {
-        $mod = $company_id===1?'barbearia':'lavacar';
-        $mod_name = BarberPro_Database::get_setting("module_{$mod}_name", $company_id===1?'Barbearia':'Lava-Car');
-        $pros = BarberPro_Database::get_professionals($company_id, true); // true = mostrar ativos + inativos
-        $label_pro = $company_id===1?'Profissionais':'Atendentes';
+        $cid_lav   = BarberPro_Modules::company_id( 'lavacar' );
+        $mod       = $company_id === $cid_lav ? 'lavacar' : 'barbearia';
+        $mod_name  = BarberPro_Database::get_setting( "module_{$mod}_name", $mod === 'lavacar' ? 'Lava-Car' : 'Barbearia' );
+        $pros      = BarberPro_Database::get_professionals($company_id, true); // true = mostrar ativos + inativos
+        $label_pro = $mod === 'lavacar' ? 'Atendentes' : 'Profissionais';
         $days_labels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
         ?>
         <div class="bp-page-header bp-animate-in">

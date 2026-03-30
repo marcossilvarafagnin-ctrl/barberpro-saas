@@ -6,8 +6,9 @@ trait BP_Sections_Finance {
     private function section_finance( int $company_id ): void {
         global $wpdb;
         $p    = $wpdb->prefix;
-        $mod  = $company_id === 1 ? 'barbearia' : 'lavacar';
-        $mod_name = BarberPro_Database::get_setting("module_{$mod}_name", $company_id===1?'Barbearia':'Lava-Car');
+        $cid_lav   = BarberPro_Modules::company_id( 'lavacar' );
+        $mod       = $company_id === $cid_lav ? 'lavacar' : 'barbearia';
+        $mod_name  = BarberPro_Database::get_setting( "module_{$mod}_name", $mod === 'lavacar' ? 'Lava-Car' : 'Barbearia' );
         $tab  = sanitize_key($_POST['tab'] ?? $_GET['tab'] ?? 'lancamentos');
 
         // ── Dados de resumo ──

@@ -54,8 +54,13 @@ class BarberPro_WhatsApp {
      * @param string $message Mensagem já parseada
      */
     public static function send( string $phone, string $message ): bool {
-        $provider = BarberPro_Database::get_setting( 'whatsapp_provider', 'cloud_api' );
+        $message  = trim( (string) $message );
         $phone    = self::normalize_phone( $phone );
+        if ( $message === '' || strlen( $phone ) < 10 ) {
+            return false;
+        }
+
+        $provider = BarberPro_Database::get_setting( 'whatsapp_provider', 'cloud_api' );
 
         switch ( $provider ) {
             case 'wapi':

@@ -13,6 +13,28 @@ class BarberPro_Frontend {
     /** Instância singleton usada pelos shortcodes */
     private static ?self $instance = null;
 
+    /**
+     * Módulos visíveis no painel SPA (Barbearia / Lava-Car / Bar) conforme permissão do usuário.
+     *
+     * @param string $panel_mode 'full' | 'bar' — no shortcode do caixa, só o Bar aparece.
+     * @return array<string,bool>
+     */
+    public static function compute_app_modules( WP_User $wp_user, string $panel_mode = 'full' ): array {
+        $panel_mode = $panel_mode === 'bar' ? 'bar' : 'full';
+        if ( $panel_mode === 'bar' && BarberPro_Modules::is_active( 'bar' ) ) {
+            return [ 'bar' => true ];
+        }
+        $active_mods = [];
+        $allowed     = get_user_meta( $wp_user->ID, 'barberpro_modules', true ) ?: [];
+        $is_admin    = user_can( $wp_user, 'manage_options' );
+        foreach ( BarberPro_Modules::active_list() as $key => $_mod ) {
+            if ( $is_admin || empty( $allowed ) || in_array( $key, $allowed, true ) ) {
+                $active_mods[ $key ] = true;
+            }
+        }
+        return $active_mods;
+    }
+
     public function __construct() {
         self::$instance = $this;
 
@@ -76,6 +98,15 @@ class BarberPro_Frontend {
             $is_logged = is_user_logged_in();
             $user_data = ['logged_in' => false];
             $active_mods = [];
+            $panel_mode  = 'full';
+            if ( is_a( $post, 'WP_Post' ) ) {
+                foreach ( [ 'barberpro_bar', 'barberpro_bar_caixa' ] as $sc ) {
+                    if ( has_shortcode( $post->post_content, $sc ) ) {
+                        $panel_mode = 'bar';
+                        break;
+                    }
+                }
+            }
             if ( $is_logged ) {
                 $wp_user   = wp_get_current_user();
                 $user_data = [
@@ -86,25 +117,13 @@ class BarberPro_Frontend {
                     'role_label' => current_user_can('administrator') ? 'Administrador'
                                   : ( current_user_can('barberpro_manager') ? 'Gerente' : 'Operador' ),
                 ];
-                $allowed  = get_user_meta( $wp_user->ID, 'barberpro_modules', true ) ?: [];
-                $is_admin = current_user_can('manage_options');
-                foreach ( BarberPro_Modules::active_list() as $key => $mod ) {
-                    if ( $is_admin || empty($allowed) || in_array($key,$allowed,true) ) {
-                        $active_mods[$key] = true;
-                    }
-                }
+                $active_mods = self::compute_app_modules( $wp_user, $panel_mode );
             }
 
-            // Bar-only shortcode: restrict to bar module and start at bar_caixa
+            // Bar-only shortcode: começa no caixa
             $start = 'dashboard';
-            if ( is_a($post,'WP_Post') ) {
-                foreach (['barberpro_bar','barberpro_bar_caixa'] as $sc) {
-                    if ( has_shortcode($post->post_content,$sc) ) {
-                        $start = 'bar_caixa';
-                        $active_mods = ['bar' => true];
-                        break;
-                    }
-                }
+            if ( $panel_mode === 'bar' ) {
+                $start = 'bar_caixa';
             }
 
             wp_localize_script( 'barberpro-app', 'bpAppData', [
@@ -113,6 +132,7 @@ class BarberPro_Frontend {
                 'restUrl'      => rest_url('barberpro/v1/'),
                 'user'         => $user_data,
                 'modules'      => empty($active_mods) ? new stdClass() : (object)$active_mods,
+                'panelMode'    => $panel_mode,
                 'siteName'     => BarberPro_Database::get_setting('business_name', get_bloginfo('name')),
                 'startSection' => $start,
             ] );

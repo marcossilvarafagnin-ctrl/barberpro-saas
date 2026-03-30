@@ -163,8 +163,10 @@ HTML;
     // =========================================================
 
     public static function send_whatsapp( string $event, object $booking ): void {
-        $phone = trim( $booking->client_phone ?? '' );
-        if ( empty($phone) ) return;
+        $phone = preg_replace( '/\D/', '', (string) ( $booking->client_phone ?? '' ) );
+        if ( strlen( $phone ) < 10 ) {
+            return;
+        }
 
         $template_key = self::wa_template_key( $event );
         if ( ! $template_key ) return;

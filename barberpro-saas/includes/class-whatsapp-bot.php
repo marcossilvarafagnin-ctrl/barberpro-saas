@@ -15,6 +15,13 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 class BarberPro_WhatsApp_Bot {
 
+    private static function cid_for_modulo( string $mod_key ): int {
+        if ( $mod_key === 'lavacar' ) {
+            return BarberPro_Modules::company_id( 'lavacar' );
+        }
+        return BarberPro_Modules::company_id( 'barbearia' );
+    }
+
     // =========================================================
     // REGISTRO DO ENDPOINT REST
     // =========================================================
@@ -180,7 +187,7 @@ class BarberPro_WhatsApp_Bot {
     }
 
     private static function etapa_servico( string $tel, string $msg, array $e ): string {
-        $cid      = $e['modulo'] === 'barbearia' ? 1 : 2;
+        $cid      = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $servicos = BarberPro_Database::get_services( $cid );
         $idx      = self::detectar_item( $msg, $servicos, 'name' );
 
@@ -202,7 +209,7 @@ class BarberPro_WhatsApp_Bot {
     }
 
     private static function etapa_profissional( string $tel, string $msg, array $e ): string {
-        $cid  = $e['modulo'] === 'barbearia' ? 1 : 2;
+        $cid  = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $pros = BarberPro_Database::get_professionals( $cid );
         $ml   = mb_strtolower( trim($msg) );
 
@@ -479,21 +486,26 @@ class BarberPro_WhatsApp_Bot {
     // =========================================================
 
     private static function criar_agendamento( array $e, string $nome, string $tel ): array {
-        $cid    = $e['modulo'] === 'barbearia' ? 1 : 2;
+        $cid    = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $pro_id = (int) $e['pro_id'];
 
         // Se "qualquer profissional", acha um disponível
         if ( $pro_id === 0 ) {
-            $svc = BarberPro_Database::get_service( (int)$e['service_id'] );
-            $dur = (int)($svc->duration_minutes ?? $svc->duration ?? 30);
-            foreach ( BarberPro_Database::get_professionals($cid) as $p ) {
-                $slots = BarberPro_Bookings::get_available_slots((int)$p->id, $e['data'], $dur, false);
-                if ( in_array($e['horario'], $slots, true) ) {
-                    $pro_id = (int)$p->id;
-                    break;
+            $svc  = BarberPro_Database::get_service( (int) $e['service_id'] );
+            $dur  = (int) ( $svc->duration_minutes ?? $svc->duration ?? 30 );
+            $want = BarberPro_Database::normalize_booking_time_key( (string) ( $e['horario'] ?? '' ) );
+            foreach ( BarberPro_Database::get_professionals( $cid ) as $p ) {
+                $slots = BarberPro_Bookings::get_available_slots( (int) $p->id, $e['data'], $dur, false );
+                foreach ( $slots as $s ) {
+                    if ( BarberPro_Database::normalize_booking_time_key( $s ) === $want ) {
+                        $pro_id = (int) $p->id;
+                        break 2;
+                    }
                 }
             }
-            if ( ! $pro_id ) return ['success' => false, 'message' => 'Nenhum profissional disponível neste horário.'];
+            if ( ! $pro_id ) {
+                return [ 'success' => false, 'message' => 'Nenhum profissional disponível neste horário.' ];
+            }
         }
 
         return BarberPro_Bookings::create_booking([
@@ -502,6 +514,7 @@ class BarberPro_WhatsApp_Bot {
             'professional_id' => $pro_id,
             'client_name'     => sanitize_text_field($nome),
             'client_phone'    => sanitize_text_field($tel),
+            'client_email'    => sanitize_email( $e['email'] ?? '' ),
             'booking_date'    => $e['data'],
             'booking_time'    => $e['horario'],
             'notes'           => 'Agendado via WhatsApp (Bot)',
@@ -516,7 +529,7 @@ class BarberPro_WhatsApp_Bot {
     // =========================================================
 
     private static function buscar_slots( array $e, string $data ): array {
-        $cid    = $e['modulo'] === 'barbearia' ? 1 : 2;
+        $cid    = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $pro_id = (int) $e['pro_id'];
         $svc    = BarberPro_Database::get_service( (int)$e['service_id'] );
         $dur    = (int)($svc->duration_minutes ?? $svc->duration ?? 30);
@@ -554,7 +567,7 @@ class BarberPro_WhatsApp_Bot {
     }
 
     private static function mensagem_escolher_servico( string $modulo, string $nome = '', bool $repete = false ): string {
-        $cid      = $modulo === 'barbearia' ? 1 : 2;
+        $cid      = self::cid_for_modulo( (string) ( $modulo ?? 'barbearia' ) );
         $servicos = BarberPro_Database::get_services($cid);
         $saudacao = $nome && ! $repete ? "Oi *{$nome}*! " : '';
         $msg      = $repete ? "Não reconheci. Escolha pelo número:\n\n" : "{$saudacao}Qual serviço você quer?\n\n";

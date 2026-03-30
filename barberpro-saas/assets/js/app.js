@@ -54,6 +54,7 @@ const BP = {
     data.append('nonce',  this.nonce);
     data.append('username', form.username.value.trim());
     data.append('password', form.password.value);
+    data.append('panel_mode', (typeof bpAppData !== 'undefined' && bpAppData.panelMode) ? bpAppData.panelMode : 'full');
 
     // Se nonce vier de cache pode estar expirado — tenta de qualquer forma
     // o servidor aceita login sem nonce estrito
@@ -63,10 +64,15 @@ const BP = {
         if (res.success) {
           this.user = res.data.user;
           window.bpAppData.user = this.user;
-          // Atualiza nonce com o novo gerado pós-login
+          if (res.data.modules && typeof res.data.modules === 'object') {
+            this.modules = res.data.modules;
+            window.bpAppData.modules = res.data.modules;
+          }
           if (res.data.nonce) this.nonce = res.data.nonce;
           this.showApp();
-          this.navigate('dashboard');
+          this.buildSidebar();
+          this.buildBottomNav();
+          this.navigate(typeof bpAppData.startSection === 'string' ? bpAppData.startSection : 'dashboard');
         } else {
           err.textContent = res.data?.message || 'Usuário ou senha incorretos.';
           err.classList.add('show');
@@ -217,6 +223,7 @@ const BP = {
       { id:'barbearia_loja_produtos',icon:'🛍️', label:'Loja — Produtos'},
       { id:'barbearia_loja_pedidos', icon:'📦', label:'Loja — Pedidos' },
       { id:'barbearia_clientes',     icon:'👥', label:'Clientes'       },
+      { id:'barbearia_mensagens',    icon:'📢', label:'Mensagens WhatsApp' },
     ]});
     if (mods.lavacar) items.push({ title: '🚗 Lava-Car', items: [
       { id:'lavacar_agenda',         icon:'📅', label:'Agendamentos'   },
@@ -227,6 +234,7 @@ const BP = {
       { id:'lavacar_loja_produtos',  icon:'🛍️', label:'Loja — Produtos'},
       { id:'lavacar_loja_pedidos',   icon:'📦', label:'Loja — Pedidos' },
       { id:'lavacar_clientes',       icon:'👥', label:'Clientes'       },
+      { id:'lavacar_mensagens',      icon:'📢', label:'Mensagens WhatsApp' },
     ]});
     if (mods.bar) items.push({ title: '🍺 Bar / Eventos', items: [
       { id:'bar_caixa',    icon:'🏧', label:'Caixa'         },
@@ -235,6 +243,7 @@ const BP = {
       { id:'bar_produtos', icon:'📦', label:'Produtos'      },
       { id:'bar_estoque',  icon:'📈', label:'Estoque'       },
       { id:'bar_clientes', icon:'👥', label:'Clientes'       },
+      { id:'bar_mensagens',icon:'📢', label:'Mensagens WhatsApp' },
     ]});
     items.push({ title: 'Sistema', items: [
       { id:'licenca',   icon:'🔑', label:'Licença'         },

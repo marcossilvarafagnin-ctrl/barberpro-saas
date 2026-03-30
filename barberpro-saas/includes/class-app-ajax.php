@@ -128,10 +128,16 @@ class BarberPro_App_Ajax {
         wp_set_current_user( $user->ID );
 
         $fresh_nonce = wp_create_nonce( 'bp_app' );
+        $panel_mode    = sanitize_key( wp_unslash( $_POST['panel_mode'] ?? 'full' ) );
+        $panel_mode    = $panel_mode === 'bar' ? 'bar' : 'full';
+        $mods          = class_exists( 'BarberPro_Frontend' )
+            ? BarberPro_Frontend::compute_app_modules( $user, $panel_mode )
+            : [];
 
         wp_send_json_success([
-            'nonce' => $fresh_nonce,
-            'user'  => [
+            'nonce'   => $fresh_nonce,
+            'modules' => empty( $mods ) ? new stdClass() : (object) $mods,
+            'user'    => [
                 'logged_in'  => true,
                 'id'         => $user->ID,
                 'name'       => $user->display_name,
@@ -258,28 +264,31 @@ class BarberPro_App_Ajax {
         switch ( $section ) {
             case 'dashboard':          $this->section_dashboard(); break;
             case 'ganhos':             $this->section_ganhos($tab); break;
-            case 'barbearia_agenda':   $this->section_agenda(1); break;
-            case 'barbearia_kanban':   $this->section_kanban(1); break;
-            case 'barbearia_servicos': $this->section_servicos(1); break;
-            case 'barbearia_profis':   $this->section_profissionais(1); break;
-            case 'barbearia_finance':  $this->section_finance(1); break;
-            case 'lavacar_agenda':     $this->section_agenda(2); break;
-            case 'lavacar_kanban':     $this->section_kanban(2); break;
-            case 'lavacar_servicos':   $this->section_servicos(2); break;
-            case 'lavacar_profis':     $this->section_profissionais(2); break;
-            case 'lavacar_finance':    $this->section_finance(2); break;
+            case 'barbearia_agenda':   $this->section_agenda( BarberPro_Modules::company_id( 'barbearia' ) ); break;
+            case 'barbearia_kanban':   $this->section_kanban( BarberPro_Modules::company_id( 'barbearia' ) ); break;
+            case 'barbearia_servicos': $this->section_servicos( BarberPro_Modules::company_id( 'barbearia' ) ); break;
+            case 'barbearia_profis':   $this->section_profissionais( BarberPro_Modules::company_id( 'barbearia' ) ); break;
+            case 'barbearia_finance':  $this->section_finance( BarberPro_Modules::company_id( 'barbearia' ) ); break;
+            case 'lavacar_agenda':     $this->section_agenda( BarberPro_Modules::company_id( 'lavacar' ) ); break;
+            case 'lavacar_kanban':     $this->section_kanban( BarberPro_Modules::company_id( 'lavacar' ) ); break;
+            case 'lavacar_servicos':   $this->section_servicos( BarberPro_Modules::company_id( 'lavacar' ) ); break;
+            case 'lavacar_profis':     $this->section_profissionais( BarberPro_Modules::company_id( 'lavacar' ) ); break;
+            case 'lavacar_finance':    $this->section_finance( BarberPro_Modules::company_id( 'lavacar' ) ); break;
             case 'bar_comandas':       $this->section_bar_comandas(); break;
             case 'bar_produtos':       $this->section_bar_produtos(); break;
             case 'bar_estoque':        $this->section_bar_estoque(); break;
             case 'bar_caixa':          $this->section_bar_caixa(); break;
             case 'bar_admin':          $this->section_bar_admin($tab); break;
             case 'bar_clientes':       $this->section_clientes( BarberPro_Modules::company_id( 'bar' ) ); break;
-            case 'barbearia_clientes':      $this->section_clientes(1); break;
-            case 'lavacar_clientes':         $this->section_clientes(2); break;
-            case 'barbearia_loja_produtos': $this->section_loja_produtos(1); break;
-            case 'barbearia_loja_pedidos':  $this->section_loja_pedidos(1);  break;
-            case 'lavacar_loja_produtos':   $this->section_loja_produtos(2); break;
-            case 'lavacar_loja_pedidos':    $this->section_loja_pedidos(2);  break;
+            case 'bar_mensagens':      $this->section_wa_mensagens( BarberPro_Modules::company_id( 'bar' ) ); break;
+            case 'barbearia_clientes':      $this->section_clientes( BarberPro_Modules::company_id( 'barbearia' ) ); break;
+            case 'lavacar_clientes':         $this->section_clientes( BarberPro_Modules::company_id( 'lavacar' ) ); break;
+            case 'barbearia_loja_produtos': $this->section_loja_produtos( BarberPro_Modules::company_id( 'barbearia' ) ); break;
+            case 'barbearia_loja_pedidos':  $this->section_loja_pedidos( BarberPro_Modules::company_id( 'barbearia' ) );  break;
+            case 'lavacar_loja_produtos':   $this->section_loja_produtos( BarberPro_Modules::company_id( 'lavacar' ) ); break;
+            case 'lavacar_loja_pedidos':    $this->section_loja_pedidos( BarberPro_Modules::company_id( 'lavacar' ) );  break;
+            case 'barbearia_mensagens':     $this->section_wa_mensagens( BarberPro_Modules::company_id( 'barbearia' ) ); break;
+            case 'lavacar_mensagens':       $this->section_wa_mensagens( BarberPro_Modules::company_id( 'lavacar' ) ); break;
             case 'licenca':            $this->section_licenca(); break;
             case 'backup':             $this->section_backup(); break;
             case 'settings':           $this->section_settings(); break;

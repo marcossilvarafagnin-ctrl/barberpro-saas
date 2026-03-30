@@ -6,9 +6,124 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 trait BP_Sections_Clients {
 
+    /** Ausência automática + envio em massa (reutilizado na carteira e na aba Mensagens). */
+    private function render_client_wa_campaigns( int $company_id, bool $with_card_hints = true ): void {
+        $cid_bar = BarberPro_Modules::company_id( 'barbearia' );
+        $cid_lav = BarberPro_Modules::company_id( 'lavacar' );
+        $cid_bm  = BarberPro_Modules::company_id( 'bar' );
+        $mod_lbl = $company_id === $cid_bar
+            ? BarberPro_Database::get_setting( 'module_barbearia_name', 'Barbearia' )
+            : ( $company_id === $cid_lav
+                ? BarberPro_Database::get_setting( 'module_lavacar_name', 'Lava-Car' )
+                : 'Bar / Eventos' );
+        $abs_on   = BarberPro_Database::get_setting( 'absence_reminder_active', '0' ) === '1';
+        $abs_days = (int) BarberPro_Database::get_setting( 'absence_reminder_days', '30' );
+        $abs_msg  = BarberPro_Database::get_setting( 'absence_reminder_msg', 'Olá, {nome}! Sentimos sua falta na {negocio} 💈 Que tal agendar? {link}' );
+        ?>
+        <div id="bpWaCampaigns" class="bp-card bp-animate-in" style="margin-bottom:14px;padding:14px;border:1px solid var(--border);border-radius:12px">
+            <div style="font-weight:800;margin-bottom:6px">📳 Mensagem de ausência (WhatsApp / W-API) — <?php echo esc_html( $mod_lbl ); ?></div>
+            <p style="font-size:.76rem;color:var(--text3);margin:0 0 10px">Disparo diário: clientes na carteira sem agendamento há X dias. Máx. 1 envio a cada 14 dias por cliente. Variáveis: <code>{nome}</code> <code>{negocio}</code> <code>{link}</code></p>
+            <label style="font-size:.85rem"><input type="checkbox" id="bpAbsActive" value="1" <?php checked( $abs_on ); ?>> Ativar</label>
+            <label style="font-size:.85rem;margin-left:12px">Dias sem agendar: <input type="number" id="bpAbsDays" value="<?php echo esc_attr( (string) $abs_days ); ?>" min="7" max="365" style="width:64px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text1)"></label>
+            <textarea id="bpAbsMsg" rows="2" style="width:100%;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.85rem"><?php echo esc_textarea( $abs_msg ); ?></textarea>
+            <button type="button" class="bp-btn bp-btn-primary bp-btn-sm" style="margin-top:8px" onclick="bpSaveAbsence()">Salvar configuração de ausência</button>
+        </div>
+
+        <div class="bp-card bp-animate-in" style="margin-bottom:14px;padding:14px;border:1px solid var(--border);border-radius:12px">
+            <div style="font-weight:800;margin-bottom:6px">📢 Envio em massa (carteira — <?php echo esc_html( $mod_lbl ); ?>)</div>
+            <p style="font-size:.76rem;color:var(--text3);margin:0 0 8px"><?php echo $with_card_hints
+                ? 'Marque os clientes nos cards abaixo ou deixe tudo desmarcado para enviar à <strong>carteira inteira</strong> (com telefone). Delay entre envios. Limite 80 por rodada.'
+                : 'Envio para <strong>toda a carteira</strong> deste módulo (quem tem telefone). Para escolher só alguns, use a Carteira de Clientes.'; ?></p>
+            <?php if ( $with_card_hints ) : ?>
+            <p style="font-size:.72rem;color:var(--text3);margin:0 0 8px">
+                <button type="button" class="bp-btn bp-btn-ghost bp-btn-sm" onclick="bpBulkSelectAll(true)">Marcar todos</button>
+                <button type="button" class="bp-btn bp-btn-ghost bp-btn-sm" onclick="bpBulkSelectAll(false)">Desmarcar</button>
+            </p>
+            <?php endif; ?>
+            <textarea id="bpBulkMsg" rows="3" placeholder="Olá {nome}! ..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.85rem"></textarea>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+                <label style="font-size:.8rem">Delay (s) <input type="number" id="bpBulkDelay" value="4" min="0" max="120" style="width:56px;padding:4px;border-radius:6px;border:1px solid var(--border)"></label>
+                <button type="button" class="bp-btn bp-btn-primary bp-btn-sm" onclick="bpBulkWhatsapp()">Enviar WhatsApp</button>
+            </div>
+        </div>
+        <?php
+        $mod_hint = $company_id === $cid_bm ? 'bar' : ( $company_id === $cid_lav ? 'lavacar' : 'barbearia' );
+        if ( $mod_hint === 'bar' ) {
+            echo '<p style="font-size:.72rem;color:var(--text3);margin:0 0 10px"><strong>Bar / Eventos:</strong> a carteira é independente das comandas.</p>';
+        } else {
+            echo '<p style="font-size:.72rem;color:var(--text3);margin:0 0 10px"><strong>Loja Virtual:</strong> o disparo usa só quem está nesta carteira (' . esc_html( $mod_lbl ) . ').</p>';
+        }
+    }
+
+    /** Aba dedicada: só ferramentas de mensagem (mesma lógica da carteira). */
+    private function section_wa_mensagens( int $company_id ): void {
+        $cid_bar = BarberPro_Modules::company_id( 'barbearia' );
+        $cid_lav = BarberPro_Modules::company_id( 'lavacar' );
+        $cid_bm  = BarberPro_Modules::company_id( 'bar' );
+        if ( $company_id === $cid_lav ) {
+            $mod_key = 'lavacar';
+        } elseif ( $company_id === $cid_bm ) {
+            $mod_key = 'bar';
+        } else {
+            $mod_key = 'barbearia';
+        }
+        $label    = $mod_key === 'lavacar' ? 'Lava-Car' : ( $mod_key === 'barbearia' ? 'Barbearia' : 'Bar / Eventos' );
+        $nav_back = $mod_key === 'lavacar' ? 'lavacar_clientes' : ( $mod_key === 'barbearia' ? 'barbearia_clientes' : 'bar_clientes' );
+        ?>
+        <input type="hidden" id="bpCCid" value="<?php echo esc_attr( (string) $company_id ); ?>">
+        <div class="bp-page-header bp-animate-in">
+            <div>
+                <div class="bp-page-title">📢 Mensagens WhatsApp</div>
+                <div class="bp-page-subtitle"><?php echo esc_html( $label ); ?> — ausência automática e envio em massa</div>
+            </div>
+            <button type="button" class="bp-btn bp-btn-ghost bp-btn-sm" onclick="BP.navigate('<?php echo esc_js( $nav_back ); ?>')">← Carteira</button>
+        </div>
+        <?php
+        $this->render_client_wa_campaigns( $company_id, false );
+        ?>
+        <p style="font-size:.78rem;color:var(--text3);margin:12px 0">Para escolher destinatários por cliente, abra a <strong>Carteira</strong> e use os checkboxes nos cards.</p>
+        <script>
+        function bpSaveAbsence() {
+            BP.ajax('bp_app_action', {
+                sub: 'save_absence_settings',
+                absence_active: document.getElementById('bpAbsActive').checked ? '1' : '',
+                absence_days: document.getElementById('bpAbsDays').value,
+                absence_msg: document.getElementById('bpAbsMsg').value
+            }).then(function(r) {
+                if (r.success) BP.toast('Configuração de ausência salva!');
+                else BP.toast(r.data?.message || 'Erro', 'error');
+            });
+        }
+        function bpBulkWhatsapp() {
+            var msg = document.getElementById('bpBulkMsg').value.trim();
+            if (!msg) { BP.toast('Digite a mensagem.', 'error'); return; }
+            if (!confirm('Enviar para todos os clientes da carteira deste módulo que têm telefone?')) return;
+            BP.ajax('bp_app_action', {
+                sub: 'client_bulk_whatsapp',
+                company_id: document.getElementById('bpCCid').value,
+                message: msg,
+                delay_seconds: document.getElementById('bpBulkDelay').value
+            }).then(function(r) {
+                if (r.success) BP.toast('Enviados: ' + (r.data?.sent ?? 0));
+                else BP.toast(r.data?.message || 'Erro', 'error');
+            });
+        }
+        </script>
+        <?php
+    }
+
     // ── Listagem de clientes ──────────────────────────────────
     private function section_clientes( int $company_id ): void {
-        $mod      = $company_id === 1 ? 'barbearia' : ( $company_id === 2 ? 'lavacar' : 'bar' );
+        $cid_bar = BarberPro_Modules::company_id( 'barbearia' );
+        $cid_lav = BarberPro_Modules::company_id( 'lavacar' );
+        $cid_bm  = BarberPro_Modules::company_id( 'bar' );
+        if ( $company_id === $cid_lav ) {
+            $mod = 'lavacar';
+        } elseif ( $company_id === $cid_bm ) {
+            $mod = 'bar';
+        } else {
+            $mod = 'barbearia';
+        }
         $search   = sanitize_text_field($_POST['search'] ?? '');
         $tipo_f   = sanitize_key($_POST['tipo'] ?? '');
         $clientes = BarberPro_Clients::list($company_id, $search, $tipo_f);
@@ -39,36 +154,7 @@ trait BP_Sections_Clients {
             </select>
         </div>
 
-        <?php
-        $abs_on   = BarberPro_Database::get_setting( 'absence_reminder_active', '0' ) === '1';
-        $abs_days = (int) BarberPro_Database::get_setting( 'absence_reminder_days', '30' );
-        $abs_msg  = BarberPro_Database::get_setting( 'absence_reminder_msg', 'Olá, {nome}! Sentimos sua falta na {negocio} 💈 Que tal agendar? {link}' );
-        $mod_lbl  = $company_id === 1 ? 'Barbearia' : ( $company_id === 2 ? 'Lava-Car' : 'Bar / Eventos' );
-        ?>
-        <div class="bp-card bp-animate-in" style="margin-bottom:14px;padding:14px;border:1px solid var(--border);border-radius:12px">
-            <div style="font-weight:800;margin-bottom:6px">📳 Mensagem de ausência (WhatsApp / W-API) — <?php echo esc_html( $mod_lbl ); ?></div>
-            <p style="font-size:.76rem;color:var(--text3);margin:0 0 10px">Disparo diário: clientes na carteira sem agendamento há X dias. Máx. 1 envio a cada 14 dias por cliente. Variáveis: <code>{nome}</code> <code>{negocio}</code> <code>{link}</code></p>
-            <label style="font-size:.85rem"><input type="checkbox" id="bpAbsActive" value="1" <?php checked( $abs_on ); ?>> Ativar</label>
-            <label style="font-size:.85rem;margin-left:12px">Dias sem agendar: <input type="number" id="bpAbsDays" value="<?php echo esc_attr( (string) $abs_days ); ?>" min="7" max="365" style="width:64px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text1)"></label>
-            <textarea id="bpAbsMsg" rows="2" style="width:100%;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.85rem"><?php echo esc_textarea( $abs_msg ); ?></textarea>
-            <button type="button" class="bp-btn bp-btn-primary bp-btn-sm" style="margin-top:8px" onclick="bpSaveAbsence()">Salvar configuração de ausência</button>
-        </div>
-
-        <div class="bp-card bp-animate-in" style="margin-bottom:14px;padding:14px;border:1px solid var(--border);border-radius:12px">
-            <div style="font-weight:800;margin-bottom:6px">📢 Envio em massa (carteira — <?php echo esc_html( $mod_lbl ); ?>)</div>
-            <p style="font-size:.76rem;color:var(--text3);margin:0 0 8px">Mensagem para todos os clientes listados abaixo. Delay entre envios (aquecimento de número). Limite 80 por rodada.</p>
-            <textarea id="bpBulkMsg" rows="3" placeholder="Olá {nome}! ..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.85rem"></textarea>
-            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
-                <label style="font-size:.8rem">Delay (s) <input type="number" id="bpBulkDelay" value="4" min="0" max="120" style="width:56px;padding:4px;border-radius:6px;border:1px solid var(--border)"></label>
-                <button type="button" class="bp-btn bp-btn-primary bp-btn-sm" onclick="bpBulkWhatsapp()">Enviar para carteira</button>
-            </div>
-        </div>
-
-        <?php if ( $mod === 'bar' ) : ?>
-        <p style="font-size:.72rem;color:var(--text3);margin:0 0 10px"><strong>Bar / Eventos:</strong> a carteira é independente das comandas. Use ausência e envio em massa para fidelizar quem você cadastra aqui (ex.: após eventos ou reservas).</p>
-        <?php else : ?>
-        <p style="font-size:.72rem;color:var(--text3);margin:0 0 10px"><strong>Loja Virtual:</strong> o disparo usa só quem está nesta carteira (<?php echo esc_html( $mod_lbl ); ?>). Clientes que compraram só pela loja entram na lista se também estiverem cadastrados aqui.</p>
-        <?php endif; ?>
+        <?php $this->render_client_wa_campaigns( $company_id, true ); ?>
 
         <!-- Lista -->
         <div id="bpClientList" class="bp-animate-in">
@@ -90,7 +176,13 @@ trait BP_Sections_Clients {
         <div class="bp-client-card" data-name="<?php echo esc_attr(mb_strtolower($c->name)); ?>"
              data-phone="<?php echo esc_attr($c->phone); ?>"
              data-tipo="<?php echo esc_attr($c->tipo); ?>"
-             style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;position:relative">
+             style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;padding-top:38px;position:relative">
+
+            <?php if ( $c->phone ) : ?>
+            <label style="position:absolute;top:10px;left:12px;font-size:.68rem;color:var(--text3);display:flex;align-items:center;gap:5px;cursor:pointer;z-index:2">
+                <input type="checkbox" class="bp-bulk-pick" value="<?php echo (int) $c->id; ?>"> Disparo
+            </label>
+            <?php endif; ?>
 
             <!-- Badge tipo -->
             <span style="position:absolute;top:12px;right:12px;font-size:.7rem;font-weight:700;color:<?php echo $color; ?>;background:<?php echo $color; ?>22;border:1px solid <?php echo $color; ?>44;border-radius:20px;padding:2px 8px">
@@ -212,6 +304,8 @@ trait BP_Sections_Clients {
         </div>
 
         <script>
+        var _bpCidBar = <?php echo (int) BarberPro_Modules::company_id( 'barbearia' ); ?>;
+        var _bpCidLav = <?php echo (int) BarberPro_Modules::company_id( 'lavacar' ); ?>;
         var _bpClients = <?php echo json_encode(array_map(function($c) {
             return [
                 'id'=>(int)$c->id,'name'=>$c->name,'phone'=>$c->phone,'email'=>$c->email??'',
@@ -301,16 +395,30 @@ trait BP_Sections_Clients {
             });
         }
 
+        function bpBulkSelectedIds() {
+            var a = [];
+            document.querySelectorAll('.bp-bulk-pick:checked').forEach(function(ch){ a.push(ch.value); });
+            return a;
+        }
+        function bpBulkSelectAll(on) {
+            document.querySelectorAll('.bp-bulk-pick').forEach(function(ch){ ch.checked = !!on; });
+        }
         function bpBulkWhatsapp() {
             var msg = document.getElementById('bpBulkMsg').value.trim();
             if (!msg) { BP.toast('Digite a mensagem.', 'error'); return; }
-            if (!confirm('Enviar para todos os clientes da carteira deste módulo?')) return;
-            BP.ajax('bp_app_action', {
+            var ids = bpBulkSelectedIds();
+            var msgC = ids.length
+                ? ('Enviar para ' + ids.length + ' cliente(s) selecionado(s)?')
+                : 'Enviar para toda a carteira deste módulo (com telefone)?';
+            if (!confirm(msgC)) return;
+            var fd = {
                 sub: 'client_bulk_whatsapp',
                 company_id: document.getElementById('bpCCid').value,
                 message: msg,
                 delay_seconds: document.getElementById('bpBulkDelay').value
-            }).then(function(r) {
+            };
+            if (ids.length) fd.client_ids = JSON.stringify(ids);
+            BP.ajax('bp_app_action', fd).then(function(r) {
                 if (r.success) BP.toast('Enviados: ' + (r.data?.sent ?? 0));
                 else BP.toast(r.data?.message || 'Erro', 'error');
             });
@@ -338,7 +446,7 @@ trait BP_Sections_Clients {
                     bpCloseClientModal();
                     BP.toast('Cliente salvo!');
                     var cid = parseInt(document.getElementById('bpCCid').value, 10);
-                    var prefix = cid === 1 ? 'barbearia' : (cid === 2 ? 'lavacar' : 'bar');
+                    var prefix = cid === _bpCidBar ? 'barbearia' : (cid === _bpCidLav ? 'lavacar' : 'bar');
                     BP.navigate(prefix+'_clientes');
                 } else {
                     BP.toast(r.data?.message || 'Erro ao salvar.', 'error');

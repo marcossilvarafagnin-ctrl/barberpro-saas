@@ -388,101 +388,169 @@ class BarberPro_Clients {
     }
 
     /**
-     * Cria conta WordPress para o cliente (se ainda não existir).
-     * Envia e-mail com credenciais de acesso.
+     * Localiza usuário WP por e-mail ou telefone (billing_phone / barberpro_phone).
      */
-    public static function maybe_create_wp_user( object $client, array $data ): void {
-        $email = sanitize_email( $data['client_email'] );
-        if ( ! $email ) return;
-
-        // Já existe usuário com esse e-mail?
-        $user = get_user_by('email', $email);
-
-        if ( ! $user ) {
-            // Gera username único a partir do e-mail
-            $username_base = sanitize_user( strstr($email, '@', true), true );
-            $username      = $username_base;
-            $suffix        = 1;
-            while ( username_exists($username) ) {
-                $username = $username_base . $suffix;
-                $suffix++;
-            }
-
-            $senha = wp_generate_password( 10, false );
-
-            $user_id = wp_create_user( $username, $senha, $email );
-
-            if ( is_wp_error($user_id) ) return;
-
-            // Define role de cliente
-            $u = new WP_User($user_id);
-            $u->set_role('subscriber');
-
-            // Salva nome e telefone nos metadados
-            update_user_meta( $user_id, 'first_name',    sanitize_text_field($data['client_name']) );
-            update_user_meta( $user_id, 'billing_phone', sanitize_text_field($data['client_phone']) );
-
-            // Vincula o usuário WP ao cliente na tabela barber_clients
-            global $wpdb;
-            $wpdb->update(
-                "{$wpdb->prefix}barber_clients",
-                ['wp_user_id' => $user_id],
-                ['id'         => $client->id]
-            );
-
-            // Envia e-mail de boas-vindas com as credenciais
-            self::send_welcome_email( $email, $data['client_name'], $username, $senha );
-
-        } else {
-            // Usuário já existe — garante vínculo na tabela de clientes
-            global $wpdb;
-            if ( empty($client->wp_user_id) ) {
-                $wpdb->update(
-                    "{$wpdb->prefix}barber_clients",
-                    ['wp_user_id' => $user->ID],
-                    ['id'         => $client->id]
-                );
+    private static function find_wp_user_by_email_or_phone( string $email, string $phone ): ?WP_User {
+        $email = sanitize_email( $email );
+        if ( $email && is_email( $email ) ) {
+            $by = get_user_by( 'email', $email );
+            if ( $by instanceof WP_User ) {
+                return $by;
             }
         }
+        $digits = self::normalize_phone( $phone );
+        if ( strlen( $digits ) < 8 ) {
+            return null;
+        }
+        global $wpdb;
+        $tail = substr( $digits, -8 );
+        $like = '%' . $wpdb->esc_like( $tail ) . '%';
+        $uid  = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key IN ('billing_phone','barberpro_phone')
+                 AND REPLACE(REPLACE(REPLACE(REPLACE(meta_value,' ',''),'-',''),'(',''),')','') LIKE %s LIMIT 1",
+                $like
+            )
+        );
+        if ( $uid ) {
+            $u = get_userdata( $uid );
+            return $u instanceof WP_User ? $u : null;
+        }
+        return null;
     }
 
     /**
-     * Envia e-mail de boas-vindas com login e senha temporária.
+     * Cria conta WordPress para o cliente (se ainda não existir).
+     * Se já existir (e-mail ou telefone), envia e-mail informativo + link de recuperação.
      */
-    private static function send_welcome_email( string $email, string $nome, string $username, string $senha ): void {
-        $nome_neg    = BarberPro_Database::get_setting('email_nome_remetente', get_bloginfo('name'));
-        $from        = BarberPro_Database::get_setting('email_remetente', get_bloginfo('admin_email'));
-        $painel_url  = BarberPro_Database::get_setting('booking_page_url', home_url('/minha-conta/'));
-        $login_url   = wp_login_url( $painel_url );
+    public static function maybe_create_wp_user( object $client, array $data ): void {
+        $email       = sanitize_email( $data['client_email'] ?? '' );
+        $company_id  = (int) ( $data['company_id'] ?? 1 );
+        if ( ! $email ) {
+            return;
+        }
 
-        $assunto = "🎉 Sua conta em {$nome_neg} foi criada!";
-        $corpo   = "Olá, {$nome}!
+        $nome_neg = BarberPro_Database::get_setting( 'business_name', get_bloginfo( 'name' ) );
+        $user     = self::find_wp_user_by_email_or_phone( $email, (string) ( $data['client_phone'] ?? '' ) );
 
-"
-                 . "Seu agendamento foi confirmado e criamos uma conta para você acompanhar seus horários.
+        global $wpdb;
 
-"
-                 . "🔐 SEUS DADOS DE ACESSO:
-"
-                 . "• Usuário: {$username}
-"
-                 . "• Senha:   {$senha}
+        if ( $user instanceof WP_User ) {
+            if ( empty( $client->wp_user_id ) ) {
+                $wpdb->update(
+                    "{$wpdb->prefix}barber_clients",
+                    [ 'wp_user_id' => $user->ID ],
+                    [ 'id' => $client->id ]
+                );
+            }
+            update_user_meta( $user->ID, 'billing_phone', sanitize_text_field( $data['client_phone'] ?? '' ) );
+            if ( ! get_user_meta( $user->ID, 'barberpro_client_of', true ) ) {
+                update_user_meta( $user->ID, 'barberpro_client_of', $company_id );
+            }
+            self::send_existing_client_account_email( $user, sanitize_text_field( $data['client_name'] ?? '' ), $nome_neg );
+            return;
+        }
 
-"
-                 . "👉 Acesse seu painel: {$login_url}
+        $username_base = sanitize_user( strstr( $email, '@', true ), true );
+        if ( $username_base === '' ) {
+            $username_base = 'cliente';
+        }
+        $username = $username_base;
+        $suffix   = 1;
+        while ( username_exists( $username ) ) {
+            $username = $username_base . $suffix;
+            $suffix++;
+        }
 
-"
-                 . "Você pode alterar sua senha após o primeiro acesso.
+        $senha   = wp_generate_password( 12, true, true );
+        $user_id = wp_create_user( $username, $senha, $email );
 
-"
-                 . "Até breve! 😊
-"
-                 . "— Equipe {$nome_neg}";
+        if ( is_wp_error( $user_id ) ) {
+            return;
+        }
 
-        wp_mail( $email, $assunto, $corpo, [
-            "Content-Type: text/plain; charset=UTF-8",
-            "From: {$nome_neg} <{$from}>",
-        ] );
+        $u = new WP_User( $user_id );
+        $u->set_role( 'subscriber' );
+
+        update_user_meta( $user_id, 'first_name', sanitize_text_field( $data['client_name'] ?? '' ) );
+        update_user_meta( $user_id, 'billing_phone', sanitize_text_field( $data['client_phone'] ?? '' ) );
+        update_user_meta( $user_id, 'barberpro_phone', sanitize_text_field( $data['client_phone'] ?? '' ) );
+        update_user_meta( $user_id, 'barberpro_client_of', $company_id );
+
+        $wpdb->update(
+            "{$wpdb->prefix}barber_clients",
+            [ 'wp_user_id' => $user_id ],
+            [ 'id' => $client->id ]
+        );
+
+        self::send_new_client_welcome_email( $email, sanitize_text_field( $data['client_name'] ?? '' ), $username, $senha, $nome_neg );
+    }
+
+    private static function client_panel_url(): string {
+        $u = trim( (string) BarberPro_Database::get_setting( 'client_panel_url', '' ) );
+        return $u !== '' ? esc_url( $u ) : home_url( '/' );
+    }
+
+    private static function mail_wrap_html( string $inner, string $nome_neg ): string {
+        $cor = BarberPro_Database::get_setting( 'email_cor_primaria', '#1a1a2e' );
+        return '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"></head><body style="margin:0;padding:0;background:#f4f4f4;font-family:Segoe UI,Arial,sans-serif">'
+            . '<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:28px 12px"><tr><td align="center">'
+            . '<table width="560" style="background:#fff;border-radius:12px;max-width:100%;overflow:hidden">'
+            . '<tr><td style="background:' . esc_attr( $cor ) . ';color:#fff;padding:22px 24px;font-size:1.1rem;font-weight:800">' . esc_html( $nome_neg ) . '</td></tr>'
+            . '<tr><td style="padding:26px 24px;font-size:15px;line-height:1.65;color:#333">' . $inner . '</td></tr>'
+            . '<tr><td style="padding:16px 24px;background:#f8f8f8;font-size:12px;color:#888;text-align:center">'
+            . esc_html( $nome_neg ) . '</td></tr></table></td></tr></table></body></html>';
+    }
+
+    private static function send_existing_client_account_email( WP_User $user, string $nome, string $nome_neg ): void {
+        $from     = BarberPro_Database::get_setting( 'email_remetente', get_bloginfo( 'admin_email' ) );
+        $login    = $user->user_login;
+        $lost     = wp_lostpassword_url( self::client_panel_url() );
+        $painel   = self::client_panel_url();
+
+        $assunto = sprintf( 'Seu agendamento em %s — você já tem cadastro', $nome_neg );
+        $inner   = '<p>Olá, <strong>' . esc_html( $nome ?: $user->display_name ) . '</strong>!</p>'
+            . '<p>Confirmamos seu agendamento. Você <strong>já possui login</strong> no nosso sistema.</p>'
+            . '<p><strong>Usuário:</strong> <code style="background:#f0f0f0;padding:4px 8px;border-radius:6px">' . esc_html( $login ) . '</code></p>'
+            . '<p>Para entrar no <strong>painel do cliente</strong> (histórico e remarcações), use o link abaixo. Se não lembrar da senha, solicite uma nova:</p>'
+            . '<p style="margin:20px 0"><a href="' . esc_url( $painel ) . '" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700">Abrir painel do cliente</a></p>'
+            . '<p><a href="' . esc_url( $lost ) . '">Recuperar senha</a></p>';
+
+        wp_mail(
+            $user->user_email,
+            $assunto,
+            self::mail_wrap_html( $inner, $nome_neg ),
+            [
+                'Content-Type: text/html; charset=UTF-8',
+                'From: ' . $nome_neg . ' <' . $from . '>',
+            ]
+        );
+    }
+
+    private static function send_new_client_welcome_email( string $email, string $nome, string $username, string $senha, string $nome_neg ): void {
+        $from   = BarberPro_Database::get_setting( 'email_remetente', get_bloginfo( 'admin_email' ) );
+        $painel = self::client_panel_url();
+        $lost   = wp_lostpassword_url( $painel );
+        $login  = wp_login_url( $painel );
+
+        $assunto = sprintf( '%s — sua conta e acesso ao painel do cliente', $nome_neg );
+        $inner   = '<p>Olá, <strong>' . esc_html( $nome ) . '</strong>! 👋</p>'
+            . '<p>Criamos uma conta para você acompanhar seus agendamentos.</p>'
+            . '<p><strong>E-mail de login:</strong> ' . esc_html( $email ) . '<br>'
+            . '<strong>Senha provisória:</strong> <code style="background:#f0f0f0;padding:4px 8px;border-radius:6px">' . esc_html( $senha ) . '</code></p>'
+            . '<p style="margin:20px 0"><a href="' . esc_url( $login ) . '" style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700">Entrar no painel</a></p>'
+            . '<p>Recomendamos trocar a senha após o primeiro acesso: <a href="' . esc_url( $lost ) . '">criar nova senha</a>.</p>'
+            . '<p style="font-size:13px;color:#666">O painel do cliente fica na página onde publicamos o shortcode <code>[barberpro_painel_cliente]</code> — se o botão acima não abrir, use o link direto: <a href="' . esc_url( $painel ) . '">' . esc_html( $painel ) . '</a></p>';
+
+        wp_mail(
+            $email,
+            $assunto,
+            self::mail_wrap_html( $inner, $nome_neg ),
+            [
+                'Content-Type: text/html; charset=UTF-8',
+                'From: ' . $nome_neg . ' <' . $from . '>',
+            ]
+        );
     }
 
     /**

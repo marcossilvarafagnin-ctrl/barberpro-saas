@@ -43,19 +43,39 @@ class BarberPro_Bookings {
         );
 
         $booked      = BarberPro_Database::get_booked_slots( $professional_id, $date );
-        $now         = current_time( 'timestamp' );
-        $min_advance = (int) BarberPro_Database::get_setting( 'booking_min_advance_minutes', 60 );
+        $min_advance = max( 0, (int) BarberPro_Database::get_setting( 'booking_min_advance_minutes', 60 ) );
         $max_days    = (int) BarberPro_Database::get_setting( 'booking_max_advance_days', 30 );
 
-        // Não permite agendar além do limite de dias
-        $max_ts = strtotime( "+{$max_days} days", $now );
+        try {
+            $tz = function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'America/Sao_Paulo' );
+        } catch ( \Exception $e ) {
+            $tz = new DateTimeZone( 'America/Sao_Paulo' );
+        }
+        $now_dt = new DateTimeImmutable( 'now', $tz );
+        $max_dt = $now_dt->modify( "+{$max_days} days" );
 
         $available = [];
         foreach ( $slots as $slot ) {
-            if ( in_array( $slot, $booked, true ) ) continue;
-            $slot_ts = strtotime( "{$date} {$slot}" );
-            if ( $slot_ts < $now + $min_advance * 60 ) continue;
-            if ( $slot_ts > $max_ts ) continue;
+            $slot_key = BarberPro_Database::normalize_booking_time_key( $slot );
+            if ( in_array( $slot_key, $booked, true ) ) {
+                continue;
+            }
+            $slot_dt = DateTimeImmutable::createFromFormat( 'Y-m-d H:i', $date . ' ' . $slot_key, $tz );
+            if ( ! $slot_dt ) {
+                continue;
+            }
+            if ( ! $admin_mode ) {
+                if ( $slot_dt <= $now_dt ) {
+                    continue;
+                }
+                $min_ok = $now_dt->modify( '+' . $min_advance . ' minutes' );
+                if ( $slot_dt < $min_ok ) {
+                    continue;
+                }
+            }
+            if ( $slot_dt > $max_dt ) {
+                continue;
+            }
             $available[] = $slot;
         }
         return $available;
@@ -106,6 +126,12 @@ class BarberPro_Bookings {
             return [ 'success' => false, 'message' => 'Serviço não encontrado.' ];
         }
 
+        $svc_duration = (int) ( $service->duration_minutes ?? $service->duration ?? 30 );
+
+        // Horário sempre no mesmo formato da coluna TIME (evita falha de validação 09:00 vs 09:00:00)
+        $data['booking_time'] = BarberPro_Database::normalize_booking_time_db( (string) ( $data['booking_time'] ?? '' ) );
+        $time_want_key        = BarberPro_Database::normalize_booking_time_key( $data['booking_time'] );
+
         // ── Resolve "Primeiro Disponível" ─────────────────────────────────────
         $pro_id     = (int) $data['professional_id'];
         $admin_mode = ! empty( $data['admin_mode'] );
@@ -115,10 +141,13 @@ class BarberPro_Bookings {
             // FIX: passa company_id para buscar só profissionais da empresa correta
             $professionals = BarberPro_Database::get_professionals( $company_id );
             foreach ( $professionals as $p ) {
-                $slots = self::get_available_slots( (int) $p->id, $data['booking_date'], (int) $service->duration, $admin_mode );
-                if ( in_array( $data['booking_time'], $slots, true ) ) {
-                    $pro_id = (int) $p->id;
-                    break;
+                $slots = self::get_available_slots( (int) $p->id, $data['booking_date'], $svc_duration, $admin_mode );
+                foreach ( $slots as $s ) {
+                    if ( BarberPro_Database::normalize_booking_time_key( $s ) === $time_want_key ) {
+                        $pro_id = (int) $p->id;
+                        $data['booking_time'] = BarberPro_Database::normalize_booking_time_db( $s );
+                        break 2;
+                    }
                 }
             }
             if ( $pro_id === 0 ) {
@@ -136,10 +165,12 @@ class BarberPro_Bookings {
             "SELECT COUNT(*) FROM {$wpdb->prefix}barber_bookings
               WHERE professional_id = %d
                 AND booking_date    = %s
-                AND booking_time    = %s
+                AND TIME_FORMAT(booking_time, '%H:%i') = %s
                 AND status NOT IN ('cancelado','recusado')
               FOR UPDATE",
-            $pro_id, $data['booking_date'], $data['booking_time']
+            $pro_id,
+            $data['booking_date'],
+            $time_want_key
         ) );
 
         if ( $conflito > 0 ) {
@@ -148,8 +179,11 @@ class BarberPro_Bookings {
         }
 
         // ── Valida disponibilidade do horário ─────────────────────────────────
-        $available = self::get_available_slots( $pro_id, $data['booking_date'], (int) $service->duration, $admin_mode );
-        if ( ! in_array( $data['booking_time'], $available, true ) ) {
+        $available = self::get_available_slots( $pro_id, $data['booking_date'], $svc_duration, $admin_mode );
+        $avail_keys = array_map( static function ( $s ) {
+            return BarberPro_Database::normalize_booking_time_key( $s );
+        }, $available );
+        if ( ! in_array( $time_want_key, $avail_keys, true ) ) {
             $wpdb->query( 'ROLLBACK' );
             return [ 'success' => false, 'message' => 'Horário não disponível. Por favor escolha outro.' ];
         }
@@ -170,11 +204,12 @@ class BarberPro_Bookings {
         $service_cat_id = (int) $wpdb->get_var(
             $wpdb->prepare(
                 "SELECT id FROM {$wpdb->prefix}barber_finance_categories WHERE company_id=%d AND type='receita' AND code='REC-001' LIMIT 1",
-                BarberPro_Database::get_company_id()
+                $company_id
             )
         );
 
         BarberPro_Finance::insert( [
+            'company_id'       => $company_id,
             'booking_id'       => $booking_id,
             'type'             => 'receita',
             'category_id'      => $service_cat_id ?: null,
@@ -198,12 +233,12 @@ class BarberPro_Bookings {
             $comm_cat_id = (int) $wpdb->get_var(
                 $wpdb->prepare(
                     "SELECT id FROM {$wpdb->prefix}barber_finance_categories WHERE company_id=%d AND type='despesa' AND code='DESP-001' LIMIT 1",
-                    BarberPro_Database::get_company_id()
+                    $company_id
                 )
             );
 
             $wpdb->insert( "{$wpdb->prefix}barber_commissions", [
-                'company_id'      => BarberPro_Database::get_company_id(),
+                'company_id'      => $company_id,
                 'professional_id' => $pro_id,
                 'booking_id'      => $booking_id,
                 'gross_amount'    => (float) $service->price,
