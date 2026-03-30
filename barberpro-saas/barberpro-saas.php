@@ -120,6 +120,8 @@ new BarberPro_App_Ajax();
         add_action( 'wp_ajax_bp_testar_mp',                    'barberpro_ajax_testar_mp' );
         add_action( 'wp_ajax_nopriv_barberpro_create_payment', [ 'BarberPro_Payment', 'ajax_create_payment' ] );
         add_action( 'wp_ajax_barberpro_create_payment',        [ 'BarberPro_Payment', 'ajax_create_payment' ] );
+        add_action( 'wp_ajax_nopriv_barberpro_payment_webhook', [ 'BarberPro_Payment', 'ajax_payment_webhook' ] );
+        add_action( 'wp_ajax_barberpro_payment_webhook',        [ 'BarberPro_Payment', 'ajax_payment_webhook' ] );
         // Loja
         add_action( 'wp_ajax_nopriv_bp_loja_pedido', 'barberpro_ajax_loja_pedido' );
         add_action( 'wp_ajax_bp_loja_pedido',        'barberpro_ajax_loja_pedido' );

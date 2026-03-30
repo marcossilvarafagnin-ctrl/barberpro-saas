@@ -249,8 +249,14 @@ class BarberPro_Bookings {
             ] );
         }
 
-        // ── WhatsApp de confirmação ───────────────────────────────────────────
-        BarberPro_Notifications::dispatch( 'confirmation', $booking );
+        // ── Notificações de confirmação ───────────────────────────────────────
+        // Para pagamentos online, a confirmação real deve acontecer apenas após
+        // o webhook do gateway (evita avisar cliente antes do pagamento).
+        $pay_method_in = sanitize_key( (string) ( $data['payment_method'] ?? 'presencial' ) );
+        $is_presencial  = in_array( $pay_method_in, [ 'presencial', 'dinheiro' ], true );
+        if ( $is_presencial ) {
+            BarberPro_Notifications::dispatch( 'confirmation', $booking );
+        }
 
         do_action( 'barberpro_booking_created', $booking_id, $booking );
 

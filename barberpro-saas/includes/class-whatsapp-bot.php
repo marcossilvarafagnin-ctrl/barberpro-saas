@@ -491,6 +491,9 @@ class BarberPro_WhatsApp_Bot {
     private static function criar_agendamento( array $e, string $nome, string $tel ): array {
         $cid    = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $pro_id = (int) $e['pro_id'];
+        $pay_method = sanitize_key( (string) ( $e['payment_method'] ?? 'presencial' ) );
+        $is_presencial = in_array( $pay_method, [ 'presencial', 'dinheiro' ], true );
+        $status = $is_presencial ? 'confirmado' : 'agendado';
 
         // Se "qualquer profissional", acha um disponível
         if ( $pro_id === 0 ) {
@@ -521,8 +524,8 @@ class BarberPro_WhatsApp_Bot {
             'booking_date'    => $e['data'],
             'booking_time'    => $e['horario'],
             'notes'           => 'Agendado via WhatsApp (Bot)',
-            'status'          => 'agendado',
-            'payment_method'  => sanitize_key( $e['payment_method'] ?? 'presencial' ),
+            'status'          => $status,
+            'payment_method'  => $pay_method,
             'admin_mode'      => false,
         ]);
     }

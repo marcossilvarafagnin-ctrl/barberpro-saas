@@ -814,7 +814,9 @@ class BarberPro_Widget_Chat {
         }
 
         $booking = self::get_booking($result['booking_id']);
-        if ($booking) self::notificar($booking, $e);
+        $pay_method = sanitize_key( (string) ( $e['payment_method'] ?? 'presencial' ) );
+        $is_presencial = in_array( $pay_method, [ 'presencial', 'dinheiro' ], true );
+        if ($booking && $is_presencial) self::notificar($booking, $e);
 
         $code  = $result['booking_code'] ?? '#'.$result['booking_id'];
         $dia   = date_i18n('l, d/m/Y', strtotime($e['data']));
@@ -861,6 +863,9 @@ class BarberPro_Widget_Chat {
     private static function criar_agendamento( array $e ): array {
         $cid    = self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) );
         $pro_id = (int)$e['pro_id'];
+        $pay_method = sanitize_key( (string) ( $e['payment_method'] ?? 'presencial' ) );
+        $is_presencial = in_array( $pay_method, [ 'presencial', 'dinheiro' ], true );
+        $status = $is_presencial ? 'confirmado' : 'agendado';
 
         if ( $pro_id === 0 ) {
             $svc  = BarberPro_Database::get_service( (int) $e['service_id'] );
@@ -890,16 +895,17 @@ class BarberPro_Widget_Chat {
             'booking_date'    => $e['data'],
             'booking_time'    => $e['horario'],
             'notes'           => 'Agendado via Widget Chat do Site',
-            'status'          => 'agendado',
-            'payment_method'  => sanitize_key($e['payment_method'] ?? 'presencial'),
+            'status'          => $status,
+            'payment_method'  => $pay_method,
             'admin_mode'      => false,
         ]);
     }
 
     // ── Notificações ─────────────────────────────────────────────
     private static function notificar( object $booking, array $e ): void {
-        // Notifica CLIENTE
-        BarberPro_Notifications::dispatch('confirmation', $booking);
+        // As notificações do CLIENTE (WhatsApp/e-mail) já são disparadas no
+        // `BarberPro_Bookings::create_booking()` apenas quando for pagamento presencial.
+        // Aqui cuidamos do DONO (widget).
 
         // Notifica DONO — e-mail
         self::notificar_dono_email($booking, $e);

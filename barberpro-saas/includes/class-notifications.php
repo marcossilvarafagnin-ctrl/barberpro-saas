@@ -91,6 +91,7 @@ class BarberPro_Notifications {
     private static function email_template_key( string $event ): ?string {
         $map = [
             'confirmation' => 'email_confirmation',
+            'payment_confirmation' => 'email_payment_confirmation',
             'reminder'     => 'email_reminder',
             'reminder2'    => 'email_reminder2',
             'cancellation' => 'email_cancellation',
@@ -103,6 +104,7 @@ class BarberPro_Notifications {
         $nome = get_bloginfo('name');
         return match($event) {
             'confirmation' => "✅ Agendamento confirmado — {nome} | {$nome}",
+            'payment_confirmation' => "✅ Agendamento pago confirmado — {nome} | {$nome}",
             'reminder'     => "⏰ Lembrete do seu agendamento — {$nome}",
             'reminder2'    => "📅 Seu agendamento é amanhã — {$nome}",
             'cancellation' => "❌ Agendamento cancelado — {$nome}",
@@ -114,6 +116,7 @@ class BarberPro_Notifications {
     private static function default_corpo( string $event ): string {
         return match($event) {
             'confirmation' => "Olá, {nome}!\n\nSeu agendamento foi confirmado com sucesso.\n\n📅 Data: {data}\n⏰ Hora: {hora}\n✂️ Serviço: {servico}\n👤 Profissional: {profissional}\n📋 Código: {codigo}\n\nTe esperamos!",
+            'payment_confirmation' => "Olá, {nome}!\n\n✅ Seu agendamento foi confirmado e o pagamento foi aprovado com sucesso.\n\n📅 Data: {data}\n⏰ Hora: {hora}\n✂️ Serviço: {servico}\n👤 Profissional: {profissional}\n📋 Código: {codigo}\n\nTe esperamos!",
             'reminder'     => "Olá, {nome}!\n\nEste é um lembrete do seu agendamento.\n\n📅 Data: {data}\n⏰ Hora: {hora}\n✂️ Serviço: {servico}\n👤 Profissional: {profissional}\n\nAté logo!",
             'reminder2'    => "Olá, {nome}!\n\nSeu agendamento é amanhã!\n\n📅 {data} às {hora}\n✂️ {servico} com {profissional}\n\nTe esperamos!",
             'cancellation' => "Olá, {nome}!\n\nSeu agendamento do dia {data} às {hora} foi cancelado.\n\nSe quiser remarcar, acesse nosso site ou entre em contato.",
@@ -190,6 +193,7 @@ HTML;
     private static function wa_template_key( string $event ): ?string {
         $map = [
             'confirmation' => 'msg_confirmation',
+            'payment_confirmation' => 'msg_payment_confirmation',
             'reminder'     => 'msg_reminder',
             'reminder2'    => 'msg_reminder2',
             'cancellation' => 'msg_cancellation',
@@ -201,6 +205,7 @@ HTML;
     private static function default_wa( string $event ): string {
         return match($event) {
             'confirmation' => "Olá {nome}! ✅ Seu agendamento foi confirmado.\n📅 {data} às {hora}\n✂️ {servico} com {profissional}\n📋 Código: {codigo}",
+            'payment_confirmation' => "Olá {nome}! ✅ Pagamento aprovado — seu agendamento está confirmado.\n📅 {data} às {hora}\n✂️ {servico} com {profissional}\n📋 Código: {codigo}",
             'reminder'     => "Lembrete, {nome}! ⏰ Você tem um agendamento hoje às {hora}.\n✂️ {servico} com {profissional}",
             'reminder2'    => "Oi {nome}! 📅 Seu agendamento é amanhã às {hora}.\n✂️ {servico} com {profissional}. Te esperamos!",
             'cancellation' => "Olá {nome}! Seu agendamento do dia {data} às {hora} foi cancelado.",

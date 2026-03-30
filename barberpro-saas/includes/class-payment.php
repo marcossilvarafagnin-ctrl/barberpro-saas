@@ -219,11 +219,138 @@ class BarberPro_Payment {
             'callback'            => [__CLASS__, 'handle_mp_webhook'],
             'permission_callback' => '__return_true',
         ]);
+        register_rest_route('barberpro/v1', '/barberpro_payment_webhook', [
+            'methods'             => 'POST',
+            'callback'            => [__CLASS__, 'handle_payment_webhook'],
+            'permission_callback' => '__return_true',
+        ]);
         register_rest_route('barberpro/v1', '/pix-status', [
             'methods'             => 'GET',
             'callback'            => [__CLASS__, 'check_pix_status'],
             'permission_callback' => '__return_true',
         ]);
+    }
+
+    /**
+     * Endpoint genérico para confirmar pagamentos aprovados.
+     * Espera booking_code/external_reference e status=approved/pago.
+     */
+    public static function handle_payment_webhook( WP_REST_Request $req ): WP_REST_Response {
+        $body = $req->get_json_params();
+
+        // Segurança opcional: reutiliza o token do bot (se configurado).
+        $token    = $req->get_header('X-Webhook-Token') ?: $req->get_param('token');
+        $secret   = BarberPro_Database::get_setting('bot_webhook_token', '');
+        $secret   = is_string($secret) ? trim($secret) : '';
+        if ( ! empty($secret) ) {
+            if ( empty($token) || ! hash_equals( (string) $secret, (string) $token ) ) {
+                return new WP_REST_Response(['ok' => false, 'message' => 'invalid_token'], 403);
+            }
+        }
+
+        $provider = sanitize_text_field( (string) ( $body['provider'] ?? $body['gateway'] ?? '' ) );
+
+        $booking_code = (string) ( $body['booking_code'] ?? $body['booking'] ?? $body['reference'] ?? '' );
+        if ( ! $booking_code ) {
+            $booking_code = (string) ( $body['external_reference'] ?? '' );
+        }
+        if ( ! $booking_code && ! empty($body['data']) && is_array($body['data']) ) {
+            $booking_code = (string) ( $body['data']['booking_code'] ?? $body['data']['external_reference'] ?? '' );
+        }
+
+        $status = strtolower( trim( (string) ( $body['status'] ?? $body['payment_status'] ?? $body['event'] ?? '' ) ) );
+        $approved = in_array( $status, ['approved','pago','paid','confirmado','confirmed','paid_out'], true )
+            || ( ! empty($body['approved']) )
+            || ( ! empty($body['data']['status']) && in_array( strtolower((string)$body['data']['status']), ['approved','pago','paid'], true ) );
+
+        if ( ! $booking_code ) {
+            return new WP_REST_Response(['ok' => true, 'skip' => 'booking_code missing'], 200);
+        }
+
+        if ( ! $approved ) {
+            return new WP_REST_Response(['ok' => true, 'skip' => 'not approved'], 200);
+        }
+
+        self::handle_payment_approved_by_code( $booking_code, $provider, $body );
+        return new WP_REST_Response(['ok' => true], 200);
+    }
+
+    private static function handle_payment_approved_by_code( string $booking_code, string $provider, array $payload = [] ): void {
+        global $wpdb;
+
+        $booking = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$wpdb->prefix}barber_bookings WHERE booking_code = %s LIMIT 1",
+            $booking_code
+        ) );
+        if ( ! $booking ) return;
+
+        // Evita duplicidade (webhook pode ser reenviado).
+        if ( (string) ($booking->payment_status ?? '') === 'pago' && (string) ($booking->status ?? '') === 'confirmado' ) {
+            return;
+        }
+
+        $provider = sanitize_text_field( $provider );
+        $pay_method_finance = match( $provider ) {
+            'mercadopago'      => 'cartao_credito',
+            'pix'              => 'pix',
+            'pix_static','pix_dynamic' => 'pix',
+            default            => 'outro',
+        };
+
+        // Atualiza booking e status de pagamento.
+        $wpdb->update(
+            "{$wpdb->prefix}barber_bookings",
+            [
+                'payment_status' => 'pago',
+                'status'         => 'confirmado',
+                'updated_at'     => current_time('mysql'),
+            ],
+            ['id' => (int) $booking->id]
+        );
+
+        // Atualiza financeiro (receita).
+        $wpdb->query( $wpdb->prepare(
+            "UPDATE {$wpdb->prefix}barber_finance
+             SET status='pago', paid_at=%s, payment_method=%s, updated_at=%s
+             WHERE booking_id=%d AND type='receita'",
+            current_time('mysql'),
+            $pay_method_finance,
+            current_time('mysql'),
+            (int) $booking->id
+        ) );
+
+        $booking2 = BarberPro_Database::get_booking( (int) $booking->id );
+        if ( ! $booking2 ) return;
+
+        // Dispara confirmação (WhatsApp + e-mail, conforme configuração).
+        BarberPro_Notifications::dispatch( 'payment_confirmation', $booking2 );
+
+        // WhatsApp para o profissional (informando agendamento pago).
+        $pro = BarberPro_Database::get_professional( (int) ($booking2->professional_id ?? 0) );
+        if ( $pro && ! empty($pro->phone) ) {
+            $pro_phone = preg_replace('/\\D/','', (string) $pro->phone );
+            if ( strlen($pro_phone) >= 10 ) {
+                $svc  = BarberPro_Database::get_service( (int) ($booking2->service_id ?? 0) );
+                $dia  = date_i18n('d/m/Y', strtotime($booking2->booking_date ?? 'now'));
+                $hora = substr( (string) ($booking2->booking_time ?? ''), 0, 5 );
+                $msg  = BarberPro_Database::get_setting(
+                    'msg_payment_confirmation_pro',
+                    "✅ Pagamento confirmado!\n\n👤 Cliente: {nome}\n✂️ Serviço: {servico}\n📅 {data} às {hora}\n📋 Código: {codigo}"
+                );
+                $msg = str_replace(
+                    ['{nome}','{servico}','{data}','{hora}','{codigo}'],
+                    [
+                        (string) ($booking2->client_name ?? ''),
+                        (string) ($svc->name ?? ''),
+                        $dia,
+                        $hora,
+                        (string) ($booking2->booking_code ?? $booking_code),
+                    ],
+                    (string) $msg
+                );
+                BarberPro_WhatsApp::send( $pro->phone, $msg );
+            }
+        }
     }
 
     public static function handle_mp_webhook( WP_REST_Request $req ): WP_REST_Response {
@@ -252,16 +379,7 @@ class BarberPro_Payment {
         if ( ! $booking ) return new WP_REST_Response(['ok'=>true],200);
 
         if ( $status === 'approved' ) {
-            $wpdb->update("{$wpdb->prefix}barber_bookings",
-                ['payment_status'=>'pago','status'=>'confirmado','updated_at'=>current_time('mysql')],
-                ['id'=>$booking->id]
-            );
-            $wpdb->update("{$wpdb->prefix}barber_finance",
-                ['status'=>'pago','payment_method'=>'mercadopago'],
-                ['booking_id'=>$booking->id]
-            );
-            $booking->status = 'confirmado';
-            BarberPro_Notifications::dispatch('confirmation', $booking);
+            self::handle_payment_approved_by_code( (string) $ref, 'mercadopago', $body );
         } elseif ( in_array($status, ['rejected','cancelled','refunded']) ) {
             $wpdb->update("{$wpdb->prefix}barber_bookings",
                 ['payment_status'=>'falhou','updated_at'=>current_time('mysql')],
@@ -279,6 +397,41 @@ class BarberPro_Payment {
             "SELECT payment_status, status FROM {$wpdb->prefix}barber_bookings WHERE booking_code=%s LIMIT 1", $code
         ));
         return new WP_REST_Response(['paid'=>$b && $b->payment_status==='pago','status'=>$b->status??''],200);
+    }
+
+    /**
+     * AJAX — endpoint alternativo para gateways que prefiram POST no admin-ajax.php.
+     * Espera: booking_code/external_reference e status=approved.
+     */
+    public static function ajax_payment_webhook(): void {
+        $body = wp_unslash( $_POST ?? [] );
+
+        $token  = $body['token'] ?? ( $_SERVER['HTTP_X_WEBHOOK_TOKEN'] ?? '' );
+        $token  = is_string($token) ? trim($token) : '';
+        $secret = BarberPro_Database::get_setting('bot_webhook_token', '');
+        $secret = is_string($secret) ? trim($secret) : '';
+        if ( ! empty($secret) ) {
+            if ( empty($token) || ! hash_equals( (string) $secret, (string) $token ) ) {
+                wp_send_json_error(['message' => 'invalid_token'], 403);
+            }
+        }
+
+        $provider = sanitize_text_field( (string) ( $body['provider'] ?? $body['gateway'] ?? '' ) );
+
+        $booking_code = (string) ( $body['booking_code'] ?? $body['booking'] ?? $body['reference'] ?? '' );
+        if ( ! $booking_code ) {
+            $booking_code = (string) ( $body['external_reference'] ?? '' );
+        }
+
+        $status = strtolower( trim( (string) ( $body['status'] ?? $body['payment_status'] ?? $body['event'] ?? '' ) ) );
+        $approved = in_array( $status, ['approved','pago','paid','confirmado','paid_out'], true );
+
+        if ( ! $booking_code || ! $approved ) {
+            wp_send_json_success(['ok'=>true,'skip'=>true]);
+        }
+
+        self::handle_payment_approved_by_code( $booking_code, $provider, $body );
+        wp_send_json_success(['ok' => true]);
     }
 
     // =========================================================
