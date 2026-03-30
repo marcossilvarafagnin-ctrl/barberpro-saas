@@ -28,8 +28,20 @@ class BarberPro_Frontend {
         $allowed     = get_user_meta( $wp_user->ID, 'barberpro_modules', true ) ?: [];
         $is_admin    = user_can( $wp_user, 'manage_options' );
         foreach ( BarberPro_Modules::active_list() as $key => $_mod ) {
-            if ( $is_admin || empty( $allowed ) || in_array( $key, $allowed, true ) ) {
+            if ( $is_admin || empty( $allowed ) || ! is_array( $allowed ) || in_array( $key, $allowed, true ) ) {
                 $active_mods[ $key ] = true;
+            }
+        }
+        // Meta `barberpro_modules` incorreta ou sem interseção com módulos ativos → painel ficava sem abas (ex.: Clientes).
+        if ( empty( $active_mods ) ) {
+            $can_panel = user_can( $wp_user, 'administrator' )
+                || user_can( $wp_user, 'barberpro_manager' )
+                || user_can( $wp_user, 'barberpro_manage_bookings' )
+                || user_can( $wp_user, 'barberpro_view_finance' );
+            if ( $can_panel ) {
+                foreach ( BarberPro_Modules::active_list() as $key => $_mod ) {
+                    $active_mods[ $key ] = true;
+                }
             }
         }
         return $active_mods;

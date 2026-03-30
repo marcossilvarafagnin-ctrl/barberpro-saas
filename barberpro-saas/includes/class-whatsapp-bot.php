@@ -108,12 +108,7 @@ class BarberPro_WhatsApp_Bot {
 
         // Verifica intenção de agendamento
         if ( self::tem_intencao_agendamento( $mensagem ) ) {
-            $bot_mode = BarberPro_Database::get_setting('bot_mode','passo_a_passo');
-            if ( $bot_mode === 'ia' && class_exists('BarberPro_OpenAI') && BarberPro_OpenAI::is_enabled() ) {
-                // Modo IA: deixa a OpenAI conduzir a conversa usando o prompt configurado
-                $ai_resp = BarberPro_OpenAI::chat($mensagem, ['nome' => $nome, 'telefone' => $telefone]);
-                if ( $ai_resp ) return $ai_resp;
-            }
+            // Sempre fluxo guiado no WhatsApp: serviço → data → horários numerados → confirmação → create_booking (sem link externo de agendamento).
             return self::iniciar_fluxo( $telefone, $mensagem, $nome );
         }
 
@@ -125,8 +120,16 @@ class BarberPro_WhatsApp_Bot {
         // Tenta resposta com IA (se configurado)
         if ( class_exists('BarberPro_OpenAI') && BarberPro_OpenAI::is_enabled()
              && BarberPro_Database::get_setting('openai_free_response','0') === '1' ) {
-            $ai_resp = BarberPro_OpenAI::free_response($mensagem, ['nome' => $nome]);
-            if ( $ai_resp ) return $ai_resp;
+            $mk      = array_key_first( self::get_modulos_ativos() ) ?: 'barbearia';
+            $ai_resp = BarberPro_OpenAI::free_response( $mensagem, [
+                'nome'                 => $nome,
+                'booking_in_chat_only' => true,
+                'module_key'           => $mk,
+                'company_id'           => self::cid_for_modulo( (string) $mk ),
+            ] );
+            if ( $ai_resp ) {
+                return BarberPro_OpenAI::strip_urls_for_in_chat_booking( $ai_resp );
+            }
         }
 
         // Resposta padrão com menu
@@ -519,7 +522,7 @@ class BarberPro_WhatsApp_Bot {
             'booking_time'    => $e['horario'],
             'notes'           => 'Agendado via WhatsApp (Bot)',
             'status'          => 'agendado',
-            'payment_method'  => 'presencial',
+            'payment_method'  => sanitize_key( $e['payment_method'] ?? 'presencial' ),
             'admin_mode'      => false,
         ]);
     }

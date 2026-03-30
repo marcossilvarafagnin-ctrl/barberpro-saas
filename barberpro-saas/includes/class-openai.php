@@ -159,20 +159,35 @@ class BarberPro_OpenAI {
     // =========================================================
 
     /**
-     * Monta o system prompt com informações do negócio.
-     * Configurável nas settings, com fallback inteligente.
+     * Resolve company_id e nome do negócio a partir do contexto (multi-empresa).
      */
+    private static function resolve_company_from_context( array $context ): array {
+        $mk = isset( $context['module_key'] ) ? sanitize_key( (string) $context['module_key'] ) : '';
+        if ( $mk === 'lavacar' && class_exists( 'BarberPro_Modules' ) ) {
+            $cid = BarberPro_Modules::company_id( 'lavacar' );
+        } elseif ( $mk === 'barbearia' && class_exists( 'BarberPro_Modules' ) ) {
+            $cid = BarberPro_Modules::company_id( 'barbearia' );
+        } else {
+            $cid = (int) ( $context['company_id'] ?? 0 );
+            if ( $cid <= 0 && class_exists( 'BarberPro_Modules' ) ) {
+                $cid = BarberPro_Modules::company_id( 'barbearia' );
+            }
+        }
+        $cid_lav = class_exists( 'BarberPro_Modules' ) ? BarberPro_Modules::company_id( 'lavacar' ) : 2;
+        $nome_negocio = ( $cid === $cid_lav )
+            ? BarberPro_Database::get_setting( 'module_lavacar_name', 'Lava-Car' )
+            : BarberPro_Database::get_setting( 'module_barbearia_name', get_bloginfo( 'name' ) );
+        return [ $cid, $nome_negocio ];
+    }
+
+    /** System prompt do chat (widget/bot); use booking_in_chat_only para não sugerir link externo de agendamento. */
     private static function build_system_prompt( array $context = [] ): string {
         // Prompt customizado pelo usuário nas configurações
         $custom = BarberPro_Database::get_setting('openai_system_prompt', '');
         if ( $custom ) return self::replace_prompt_vars($custom, $context);
 
-        // Prompt padrão gerado automaticamente com dados do negócio (módulo: barbearia=1, lava-car=2)
-        $cid          = (int) ( $context['company_id'] ?? 1 );
-        $cid          = in_array( $cid, [ 1, 2 ], true ) ? $cid : 1;
-        $nome_negocio = $cid === 2
-            ? BarberPro_Database::get_setting('module_lavacar_name', 'Lava-Car')
-            : BarberPro_Database::get_setting('module_barbearia_name', get_bloginfo('name'));
+        $in_chat_only = ! empty( $context['booking_in_chat_only'] );
+        [ $cid, $nome_negocio ] = self::resolve_company_from_context( $context );
         $agenda_url   = BarberPro_Database::get_setting('booking_page_url', home_url('/agendamento/'));
 
         // Busca serviços disponíveis para contextualizar a IA
@@ -197,6 +212,22 @@ class BarberPro_OpenAI {
 
         $hint = ! empty( $context['widget_ia_hint'] ) ? "\nCONTEXTO DO WIDGET: " . $context['widget_ia_hint'] . "\n" : '';
 
+        $link_block = $in_chat_only
+            ? "
+AGENDAMENTO:
+- O cliente agenda **somente neste chat**, no fluxo guiado (serviço → data → horário → confirmação). Não existe página externa para marcar horário.
+"
+            : "
+LINK DE AGENDAMENTO (site): {$agenda_url}
+";
+
+        $regras_link = $in_chat_only
+            ? "- **Proibido** enviar links (http/https), URLs, \"acesse o site\", \"clique aqui\" ou qualquer endereço para agendar fora deste chat.\n"
+            . "- Para marcar horário, diga que pode seguir as opções e perguntas do assistente **aqui mesmo** (nome, serviço, data e horário).\n"
+            . "- Se não souber algo, seja honesto e ofereça continuar no chat ou o telefone/WhatsApp do salão — **sem** link de agendamento.\n"
+            : "- Para agendar, guie com clareza e, se faltar dado, pergunte com gentileza\n"
+            . "- Se não souber, diga com honestidade e ofereça o contato ou o link {$agenda_url}\n";
+
         return "Você é o assistente humano de {$nome_negocio} no chat do site. Fale como uma pessoa atenciosa da recepção — natural, empática, calorosa, nunca robótica. Varie um pouco o jeito de cumprimentar e de responder; evite frases prontas repetidas.
 
 INFORMAÇÕES DO NEGÓCIO:
@@ -205,9 +236,7 @@ INFORMAÇÕES DO NEGÓCIO:
 " . ($localizacao ? "- Localização: {$localizacao}\n" : '') . "
 SERVIÇOS DISPONÍVEIS:
 {$lista_svc}
-" . ($lista_pro ? "PROFISSIONAIS / EQUIPE: {$lista_pro}\n" : '') . $slots_info . "
-LINK DE AGENDAMENTO: {$agenda_url}
-{$hint}
+" . ($lista_pro ? "PROFISSIONAIS / EQUIPE: {$lista_pro}\n" : '') . $slots_info . $link_block . $hint . "
 TOM:
 - Português do Brasil, informal mas respeitoso (\"você\"), com leve calor humano
 - Emojis com moderação (no máximo 1–2 por mensagem quando fizer sentido)
@@ -218,19 +247,30 @@ REGRAS:
 - Máximo 3 parágrafos curtos por resposta
 - Não invente horários — só os listados em HORÁRIOS DISPONÍVEIS
 - Não invente preços ou serviços que não estão na lista
-- Para agendar, guie com clareza e, se faltar dado, pergunte com gentileza
-- Se não souber, diga com honestidade e ofereça o contato ou o link {$agenda_url}";
+" . $regras_link;
     }
 
     private static function replace_prompt_vars( string $prompt, array $context ): string {
         $nome_negocio = BarberPro_Database::get_setting('module_barbearia_name', get_bloginfo('name'));
         $agenda_url   = BarberPro_Database::get_setting('booking_page_url', home_url('/agendamento/'));
+        if ( ! empty( $context['booking_in_chat_only'] ) ) {
+            $agenda_url = '';
+        }
 
         return str_replace(
             ['{negocio}', '{link_agendamento}', '{nome_cliente}'],
             [$nome_negocio, $agenda_url, $context['nome'] ?? ''],
             $prompt
         );
+    }
+
+    /**
+     * Remove URLs da resposta no widget quando o agendamento deve ficar só no chat.
+     */
+    public static function strip_urls_for_in_chat_booking( string $text ): string {
+        $text = preg_replace( '#https?://[^\s\)\]\>\"\']+#iu', '', $text );
+        $text = preg_replace( '#\[[^\]]*\]\(\s*#u', '', $text );
+        return trim( preg_replace( "/\n{3,}/u", "\n\n", $text ) );
     }
 
     // =========================================================

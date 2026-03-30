@@ -7,12 +7,23 @@ const BP = {
   nonce:   bpAppData.nonce,
   restUrl: bpAppData.restUrl,
   user:    bpAppData.user || {},
-  modules: bpAppData.modules || {},
+  modules: {},
   currentSection: null,
   currentTab: null,
 
+  /** Normaliza módulos do servidor (barbearia / lavacar / bar) para booleanos estáveis na navegação. */
+  normalizeModules(raw) {
+    const m = raw && typeof raw === 'object' ? raw : {};
+    return {
+      barbearia: !!m.barbearia,
+      lavacar:   !!m.lavacar,
+      bar:       !!m.bar,
+    };
+  },
+
   // ── Init ──────────────────────────────────────────────────────
   init() {
+    this.modules = this.normalizeModules(typeof bpAppData !== 'undefined' ? bpAppData.modules : {});
     if (!this.user.logged_in) {
       this.showLogin();
     } else {
@@ -65,7 +76,7 @@ const BP = {
           this.user = res.data.user;
           window.bpAppData.user = this.user;
           if (res.data.modules && typeof res.data.modules === 'object') {
-            this.modules = res.data.modules;
+            this.modules = this.normalizeModules(res.data.modules);
             window.bpAppData.modules = res.data.modules;
           }
           if (res.data.nonce) this.nonce = res.data.nonce;
@@ -222,7 +233,7 @@ const BP = {
       { id:'barbearia_finance',      icon:'💵', label:'Financeiro'     },
       { id:'barbearia_loja_produtos',icon:'🛍️', label:'Loja — Produtos'},
       { id:'barbearia_loja_pedidos', icon:'📦', label:'Loja — Pedidos' },
-      { id:'barbearia_clientes',     icon:'👥', label:'Clientes'       },
+      { id:'barbearia_clientes',     icon:'👥', label:'Carteira de Clientes' },
       { id:'barbearia_mensagens',    icon:'📢', label:'Mensagens WhatsApp' },
     ]});
     if (mods.lavacar) items.push({ title: '🚗 Lava-Car', items: [
@@ -233,7 +244,7 @@ const BP = {
       { id:'lavacar_finance',        icon:'💵', label:'Financeiro'     },
       { id:'lavacar_loja_produtos',  icon:'🛍️', label:'Loja — Produtos'},
       { id:'lavacar_loja_pedidos',   icon:'📦', label:'Loja — Pedidos' },
-      { id:'lavacar_clientes',       icon:'👥', label:'Clientes'       },
+      { id:'lavacar_clientes',       icon:'👥', label:'Carteira de Clientes' },
       { id:'lavacar_mensagens',      icon:'📢', label:'Mensagens WhatsApp' },
     ]});
     if (mods.bar) items.push({ title: '🍺 Bar / Eventos', items: [
@@ -242,7 +253,7 @@ const BP = {
       { id:'bar_comandas', icon:'🧾', label:'Comandas'      },
       { id:'bar_produtos', icon:'📦', label:'Produtos'      },
       { id:'bar_estoque',  icon:'📈', label:'Estoque'       },
-      { id:'bar_clientes', icon:'👥', label:'Clientes'       },
+      { id:'bar_clientes', icon:'👥', label:'Carteira de Clientes' },
       { id:'bar_mensagens',icon:'📢', label:'Mensagens WhatsApp' },
     ]});
     items.push({ title: 'Sistema', items: [

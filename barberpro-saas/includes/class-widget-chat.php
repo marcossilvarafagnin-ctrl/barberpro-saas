@@ -302,7 +302,33 @@ class BarberPro_Widget_Chat {
     // ── Etapas ───────────────────────────────────────────────────
 
     // ── Modo IA livre (chat com histórico multi-turn) ────────────
+    /**
+     * Cliente pediu para agendar — prioriza o fluxo guiado no próprio chat (sem IA genérica com link externo).
+     */
+    private static function widget_pedido_fluxo_agendamento( string $msg ): bool {
+        $ml = mb_strtolower( trim( $msg ) );
+        if ( $ml === '' ) {
+            return false;
+        }
+        return (bool) preg_match(
+            '/\b(quero agendar|quero marcar|fazer agendamento|marcar hor[aá]rio|marcar um hor[aá]rio|agendar hor[aá]rio|agendar agora|marcar corte|quero cortar|agendar|marcar\b)/u',
+            $ml
+        );
+    }
+
     private static function etapa_ia_livre( string $session, string $msg, array $e ): array {
+        if ( self::widget_pedido_fluxo_agendamento( $msg ) ) {
+            $e['etapa']      = 'coletar_nome';
+            $e['ia_history'] = [];
+            self::set_estado( $session, $e );
+            $pedir = BarberPro_Database::get_setting( 'wc_msg_pedir_nome', 'Para começar, qual é o seu nome?' );
+            return [
+                'message'       => "Combinado! Vamos fazer seu agendamento aqui no chat, sem sair da página 😊\n\n" . $pedir,
+                'etapa'         => 'coletar_nome',
+                'quick_replies' => [],
+            ];
+        }
+
         $history = is_array($e['ia_history'] ?? null) ? $e['ia_history'] : [];
 
         // Data na mensagem → horários reais + slot_buttons (JSON para o widget)
@@ -342,17 +368,23 @@ class BarberPro_Widget_Chat {
                 $mods_m = self::get_modulos();
                 $mod_key = array_key_first($mods_m) ?: 'barbearia';
             }
-            $cid_ctx = $mod_key === 'lavacar' ? 2 : 1;
+            $cid_ctx = self::cid_for_modulo( (string) $mod_key );
             $context = [
-                'nome'              => $e['nome'] ?? '',
-                'celular'           => $e['celular'] ?? '',
-                'slots_disponiveis' => $slots_context,
-                'company_id'        => $cid_ctx,
+                'nome'                  => $e['nome'] ?? '',
+                'celular'               => $e['celular'] ?? '',
+                'slots_disponiveis'     => $slots_context,
+                'company_id'            => $cid_ctx,
+                'module_key'            => $mod_key,
+                'booking_in_chat_only'  => true,
             ];
             if ( $slot_merge ) {
                 $context['widget_ia_hint'] = 'O cliente escolheu uma data com horários livres no sistema. Responda em 1–2 frases, de forma acolhedora. Não liste horários no texto — eles aparecerão como botões abaixo da mensagem.';
             }
             $resposta_ia = BarberPro_OpenAI::chat_with_history($history, $msg, $context);
+        }
+
+        if ( $resposta_ia && class_exists( 'BarberPro_OpenAI' ) ) {
+            $resposta_ia = BarberPro_OpenAI::strip_urls_for_in_chat_booking( $resposta_ia );
         }
 
         if ( ! $resposta_ia ) {
@@ -557,9 +589,17 @@ class BarberPro_Widget_Chat {
                 $ctx_nome = $e['nome'] ?? '';
                 $ia = BarberPro_OpenAI::chat(
                     $msg,
-                    ['nome' => $ctx_nome],
-                    'Você é o assistente do widget de agendamento de uma barbearia. O cliente está na etapa de escolher um horário entre botões na tela, mas enviou um texto que não corresponde a um horário (pergunta casual, piada, "você é IA?", etc.). Responda de forma breve, natural e em português brasileiro. Não invente horários. Convide-o a tocar em um dos botões de horário. Máximo 2 frases curtas.'
+                    [
+                        'nome'                 => $ctx_nome,
+                        'booking_in_chat_only' => true,
+                        'module_key'           => (string) ( $e['modulo'] ?? 'barbearia' ),
+                        'company_id'           => self::cid_for_modulo( (string) ( $e['modulo'] ?? 'barbearia' ) ),
+                    ],
+                    'Você é o assistente do widget de agendamento. O cliente está na etapa de escolher um horário entre botões na tela, mas enviou um texto que não corresponde a um horário (pergunta casual, piada, etc.). Responda de forma breve, natural e em português brasileiro. Não invente horários. Convide-o a tocar em um dos botões de horário. Não envie links nem URLs. Máximo 2 frases curtas.'
                 );
+                if ( $ia && class_exists( 'BarberPro_OpenAI' ) ) {
+                    $ia = BarberPro_OpenAI::strip_urls_for_in_chat_booking( $ia );
+                }
                 if ( $ia ) {
                     $base['message'] = trim( $ia ) . "\n\n" . $base['message'];
                 }
@@ -991,14 +1031,16 @@ class BarberPro_Widget_Chat {
             $label = $mm==='00' ? "{$hh}h" : "{$hh}h{$mm}";
             $slot_buttons[] = ['value' => $s, 'label' => $label];
         }
-        foreach ( array_slice($slots, 0, 8) as $s ) {
+        $max_list = 28;
+        $shown    = array_slice( $slots, 0, $max_list );
+        foreach ( $shown as $s ) {
             [$hh,$mm] = explode(':', substr($s,0,5));
             $label = $mm==='00' ? "{$hh}h" : "{$hh}h{$mm}";
             $qr[]  = $label;
             $msg  .= "• *{$label}*\n";
         }
-        if ( count($slots) > 8 ) {
-            $msg .= "_...e mais " . ( count($slots) - 8 ) . " horários (use os botões abaixo para ver todos)_\n";
+        if ( count($slots) > $max_list ) {
+            $msg .= "_...e mais " . ( count($slots) - $max_list ) . " horários (use os botões abaixo para ver todos)_\n";
         }
         $msg .= "\nToque no horário desejado:";
         return [
@@ -1043,10 +1085,16 @@ class BarberPro_Widget_Chat {
         [$hh, $mm] = array_pad( explode( ':', substr( $hora_raw, 0, 5 ) ), 2, '00' );
         $hora = ( $mm === '00' ) ? "{$hh}h" : "{$hh}h{$mm}";
         $nome_svc = $svc->name ?? 'o serviço';
+        $mod_key  = (string) ( $e['modulo'] ?? 'barbearia' );
         $prompt   = "O cliente confirmou o agendamento: {$dia} às {$hora}, serviço: {$nome_svc}. "
             . 'Pergunte de forma breve e simpática em português brasileiro se ele prefere pagar agora online para garantir a vaga ou pagar presencialmente no local. No máximo 3 frases. Use um tom acolhedor; não precisa listar métodos técnicos (PIX, cartão).';
-        $ia = BarberPro_OpenAI::chat( $prompt, $e, 'Você é o assistente de uma barbearia. Responda só com a pergunta ao cliente, sem prefixos como "Claro".' );
-        $ia = $ia ? trim( $ia ) : '';
+        $ctx = array_merge( $e, [
+            'booking_in_chat_only' => true,
+            'module_key'           => $mod_key,
+            'company_id'           => self::cid_for_modulo( $mod_key ),
+        ] );
+        $ia = BarberPro_OpenAI::chat( $prompt, $ctx, 'Você é o assistente de uma barbearia. Responda só com a pergunta ao cliente, sem prefixos como "Claro". Não envie links nem URLs.' );
+        $ia = $ia ? trim( BarberPro_OpenAI::strip_urls_for_in_chat_booking( $ia ) ) : '';
         return $ia !== '' ? $ia : $fallback;
     }
 
