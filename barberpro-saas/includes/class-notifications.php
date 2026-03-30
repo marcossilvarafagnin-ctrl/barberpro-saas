@@ -51,7 +51,10 @@ class BarberPro_Notifications {
     }
 
     public static function metodo_ativo( string $metodo ): bool {
-        return BarberPro_Database::get_setting( "notify_{$metodo}_ativo", '0' ) === '1';
+        // E-mail deve vir ativo por padrão quando a instalação ainda não tem setting explícito.
+        // WhatsApp/Bot permanecem opt-in.
+        $default = $metodo === 'email' ? '1' : '0';
+        return BarberPro_Database::get_setting( "notify_{$metodo}_ativo", $default ) === '1';
     }
 
     // =========================================================

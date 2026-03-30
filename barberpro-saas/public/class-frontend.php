@@ -102,9 +102,15 @@ class BarberPro_Frontend {
 
         // ── SPA assets (barberpro_app / bar_caixa) ──
         if ( $has_app ) {
-            wp_enqueue_style(  'barberpro-app', BARBERPRO_PLUGIN_URL.'assets/css/app.css', [], BARBERPRO_VERSION );
+            $app_css_ver = file_exists( BARBERPRO_PLUGIN_DIR . 'assets/css/app.css' )
+                ? (string) filemtime( BARBERPRO_PLUGIN_DIR . 'assets/css/app.css' )
+                : BARBERPRO_VERSION;
+            $app_js_ver = file_exists( BARBERPRO_PLUGIN_DIR . 'assets/js/app.js' )
+                ? (string) filemtime( BARBERPRO_PLUGIN_DIR . 'assets/js/app.js' )
+                : BARBERPRO_VERSION;
+            wp_enqueue_style(  'barberpro-app', BARBERPRO_PLUGIN_URL.'assets/css/app.css', [], $app_css_ver );
             wp_enqueue_script( 'chart-js', 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js', [], '4.4.0', true );
-            wp_enqueue_script( 'barberpro-app', BARBERPRO_PLUGIN_URL.'assets/js/app.js', ['chart-js'], BARBERPRO_VERSION, true );
+            wp_enqueue_script( 'barberpro-app', BARBERPRO_PLUGIN_URL.'assets/js/app.js', ['chart-js'], $app_js_ver, true );
 
             $is_logged = is_user_logged_in();
             $user_data = ['logged_in' => false];
