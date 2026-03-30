@@ -1216,5 +1216,126 @@ trait BP_Actions_Operations {
         wp_send_json_success( ['sent' => $sent] );
     }
 
+    /**
+     * Envio em massa com progresso em tempo real (processado via WP-Cron).
+     * Subs:
+     *  - selection_mode: 'all' | 'filtered'
+     *  - filter_search, filter_tipo (quando filtered)
+     *  - media_file (opcional, $_FILES['media_file'])
+     */
+    private function action_client_bulk_whatsapp_start(): void {
+        $company_id     = absint( $_POST['company_id'] ?? 1 );
+        $message        = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
+        $delay_seconds  = max( 0, min( 120, absint( $_POST['delay_seconds'] ?? 3 ) ) );
+        $selection_mode = sanitize_key( (string) ( $_POST['selection_mode'] ?? 'all' ) );
+
+        $filter_search = sanitize_text_field( wp_unslash( $_POST['filter_search'] ?? '' ) );
+        $filter_tipo   = sanitize_key( (string) ( $_POST['filter_tipo'] ?? '' ) );
+
+        if ( ! $company_id ) wp_send_json_error(['message'=>'company_id inválido.']);
+        if ( $message === '' ) wp_send_json_error(['message'=>'Digite a mensagem.']);
+
+        // Media (opcional)
+        $media_url  = null;
+        $media_type = 'image';
+        if ( ! empty( $_FILES['media_file']['tmp_name'] ) && is_uploaded_file( (string) $_FILES['media_file']['tmp_name'] ) ) {
+            $size_bytes = (int) ( $_FILES['media_file']['size'] ?? 0 );
+            if ( $size_bytes > 15 * 1024 * 1024 ) {
+                wp_send_json_error(['message'=>'Mídia muito grande. Limite: 15MB.']);
+            }
+            if ( ! function_exists( 'wp_handle_upload' ) ) {
+                require_once ABSPATH . 'wp-admin/includes/file.php';
+            }
+
+            $check = wp_check_filetype( $_FILES['media_file']['tmp_name'] );
+            $mime  = $check['type'] ?? (string) ( $_FILES['media_file']['type'] ?? '' );
+
+            $allowed = [
+                'image' => 'image/',
+                'video' => 'video/',
+                'doc'   => ['application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document','text/plain'],
+            ];
+            $is_image = is_string($mime) && str_starts_with( $mime, 'image/' );
+            $is_video = is_string($mime) && str_starts_with( $mime, 'video/' );
+
+            // Para docs: pdf (e alguns tipos comuns)
+            $is_doc = false;
+            if ( is_string($mime) ) {
+                $is_doc = in_array( $mime, $allowed['doc'], true );
+            }
+            if ( ! $is_image && ! $is_video && ! $is_doc ) {
+                // Permite também outros anexos via document
+                $media_type = 'document';
+            } else {
+                $media_type = $is_image ? 'image' : ( ( $is_video ? 'video' : 'document' ) );
+            }
+
+            $upload = wp_handle_upload(
+                $_FILES['media_file'],
+                [ 'test_form' => false, 'mimes' => null ]
+            );
+            if ( ! isset( $upload['url'] ) ) {
+                wp_send_json_error(['message'=>'Falha ao fazer upload da mídia.']);
+            }
+            $media_url = (string) $upload['url'];
+        }
+
+        // Determina lista de clientes.
+        $search = '';
+        $tipo   = '';
+        if ( $selection_mode === 'filtered' ) {
+            $search = $filter_search;
+            $tipo   = $filter_tipo;
+        }
+
+        $clients = BarberPro_Clients::list( $company_id, $search, $tipo );
+        $total_before_cap = count( $clients );
+        // Evita excesso (mesma lógica do envio antigo)
+        $clients = array_slice( $clients, 0, 80 );
+        $capped  = $total_before_cap > count( $clients );
+
+        $targets = [];
+        $skipped_no_phone = 0;
+        foreach ( $clients as $c ) {
+            $phone = preg_replace( '/\D/', '', (string) ( $c->phone ?? '' ) );
+            if ( ! $phone || strlen($phone) < 10 ) {
+                $skipped_no_phone++;
+                continue;
+            }
+            $targets[] = [ 'phone' => $phone, 'name' => (string) ( $c->name ?? '' ) ];
+        }
+
+        $job = BarberPro_Bulk_WhatsApp::start_job([
+            'job_id'        => sanitize_key( (string) ( $_POST['job_id'] ?? '' ) ),
+            'company_id'    => $company_id,
+            'delay_seconds' => $delay_seconds,
+            'message'       => $message,
+            'media_url'     => $media_url,
+            'media_type'    => $media_url ? $media_type : 'image',
+            'targets'       => $targets,
+        ]);
+
+        if ( empty( $job['success'] ) ) {
+            wp_send_json_error( [ 'message' => $job['message'] ?? 'Erro ao iniciar disparo.' ] );
+        }
+
+        wp_send_json_success([
+            'job_id' => $job['job_id'] ?? null,
+            'total'  => $job['total'] ?? count($targets),
+            'skipped_no_phone' => $skipped_no_phone,
+            'capped' => $capped,
+        ]);
+    }
+
+    private function action_client_bulk_whatsapp_progress(): void {
+        $job_id = sanitize_text_field( (string) ( $_POST['job_id'] ?? '' ) );
+        if ( ! $job_id ) wp_send_json_error(['message'=>'job_id inválido.']);
+
+        $status = BarberPro_Bulk_WhatsApp::get_status( $job_id );
+        if ( empty( $status['found'] ) ) {
+            wp_send_json_error(['message'=>'Job não encontrado ou expirado.']);
+        }
+        wp_send_json_success( $status );
+    }
 
 }

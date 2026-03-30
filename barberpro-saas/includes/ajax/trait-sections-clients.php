@@ -32,18 +32,39 @@ trait BP_Sections_Clients {
         <div class="bp-card bp-animate-in" style="margin-bottom:14px;padding:14px;border:1px solid var(--border);border-radius:12px">
             <div style="font-weight:800;margin-bottom:6px">📢 Envio em massa (carteira — <?php echo esc_html( $mod_lbl ); ?>)</div>
             <p style="font-size:.76rem;color:var(--text3);margin:0 0 8px"><?php echo $with_card_hints
-                ? 'Marque os clientes nos cards abaixo ou deixe tudo desmarcado para enviar à <strong>carteira inteira</strong> (com telefone). Delay entre envios. Limite 80 por rodada.'
+                ? 'Envio em massa: escolha o destino como <strong>carteira inteira</strong> ou <strong>por filtro</strong> (busca/tipo). Mídia opcional. Delay entre envios. Limite 80 por rodada.'
                 : 'Envio para <strong>toda a carteira</strong> deste módulo (quem tem telefone). Para escolher só alguns, use a Carteira de Clientes.'; ?></p>
             <?php if ( $with_card_hints ) : ?>
-            <p style="font-size:.72rem;color:var(--text3);margin:0 0 8px">
-                <button type="button" class="bp-btn bp-btn-ghost bp-btn-sm" onclick="bpBulkSelectAll(true)">Marcar todos</button>
-                <button type="button" class="bp-btn bp-btn-ghost bp-btn-sm" onclick="bpBulkSelectAll(false)">Desmarcar</button>
-            </p>
+            <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:8px;margin-bottom:6px">
+                <label style="font-size:.82rem;color:var(--text2);display:flex;gap:8px;align-items:center">
+                    <input type="radio" name="bpBulkSelectionMode" value="all" checked>
+                    Todos (carteira inteira)
+                </label>
+                <label style="font-size:.82rem;color:var(--text2);display:flex;gap:8px;align-items:center">
+                    <input type="radio" name="bpBulkSelectionMode" value="filtered">
+                    Por filtro (busca/tipo)
+                </label>
+            </div>
             <?php endif; ?>
-            <textarea id="bpBulkMsg" rows="3" placeholder="Olá {nome}! ..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.85rem"></textarea>
-            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
-                <label style="font-size:.8rem">Delay (s) <input type="number" id="bpBulkDelay" value="4" min="0" max="120" style="width:56px;padding:4px;border-radius:6px;border:1px solid var(--border)"></label>
-                <button type="button" class="bp-btn bp-btn-primary bp-btn-sm" onclick="bpBulkWhatsapp()">Enviar WhatsApp</button>
+            <?php if ( ! $with_card_hints ) : ?>
+            <input type="hidden" id="bpBulkSelectionMode" value="all">
+            <?php endif; ?>
+            <textarea id="bpBulkMsg" rows="3" placeholder="Olá {nome}! ..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.85rem;margin-top:8px"></textarea>
+
+            <div style="display:flex;gap:10px;align-items:flex-start;margin-top:10px;flex-wrap:wrap">
+                <label style="font-size:.82rem;color:var(--text2);display:flex;flex-direction:column;gap:6px;min-width:220px">
+                    Mídia (opcional)
+                    <input type="file" id="bpBulkMedia" accept="image/*,video/*,.pdf">
+                </label>
+                <label style="font-size:.8rem">Delay (s) <input type="number" id="bpBulkDelay" value="4" min="0" max="120" style="width:56px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)"></label>
+                <button type="button" class="bp-btn bp-btn-primary bp-btn-sm" onclick="bpBulkWhatsapp()">Disparar</button>
+            </div>
+
+            <div id="bpBulkProgressWrap" style="display:none;margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:12px;background:var(--bg2)">
+                <div id="bpBulkProgressText" style="font-size:.82rem;color:var(--text2);font-weight:700;margin-bottom:8px">Aguardando...</div>
+                <div style="height:10px;border-radius:999px;background:rgba(245,166,35,.15);overflow:hidden">
+                    <div id="bpBulkProgressBar" style="height:100%;width:0%;background:var(--accent);transition:width .2s"></div>
+                </div>
             </div>
         </div>
         <?php
@@ -97,15 +118,87 @@ trait BP_Sections_Clients {
         function bpBulkWhatsapp() {
             var msg = document.getElementById('bpBulkMsg').value.trim();
             if (!msg) { BP.toast('Digite a mensagem.', 'error'); return; }
-            if (!confirm('Enviar para todos os clientes da carteira deste módulo que têm telefone?')) return;
-            BP.ajax('bp_app_action', {
-                sub: 'client_bulk_whatsapp',
+            var delayInput = document.getElementById('bpBulkDelay');
+            var delayVal = parseInt(delayInput?.value || '0', 10);
+            if (isNaN(delayVal) || delayVal < 0 || delayVal > 120) {
+                BP.toast('Delay inválido. Use entre 0 e 120 segundos.', 'error');
+                return;
+            }
+            if (delayVal > 20 && !confirm('Delay alto (' + delayVal + 's). Confirmar disparo mesmo assim?')) {
+                return;
+            }
+
+            var wrap = document.getElementById('bpBulkProgressWrap');
+            if (wrap) wrap.style.display = '';
+            if (document.getElementById('bpBulkProgressText')) {
+                document.getElementById('bpBulkProgressText').textContent = 'Iniciando...';
+            }
+            if (document.getElementById('bpBulkProgressBar')) {
+                document.getElementById('bpBulkProgressBar').style.width = '0%';
+            }
+
+            var selectionMode = 'all';
+            var smEl = document.querySelector('input[name="bpBulkSelectionMode"]:checked');
+            if (smEl && smEl.value) selectionMode = smEl.value;
+
+            var fd = {
+                sub: 'client_bulk_whatsapp_start',
                 company_id: document.getElementById('bpCCid').value,
                 message: msg,
-                delay_seconds: document.getElementById('bpBulkDelay').value
-            }).then(function(r) {
-                if (r.success) BP.toast('Enviados: ' + (r.data?.sent ?? 0));
-                else BP.toast(r.data?.message || 'Erro', 'error');
+                delay_seconds: delayVal,
+                selection_mode: selectionMode
+            };
+
+            if (selectionMode === 'filtered') {
+                var fs = document.getElementById('bpClientSearch')?.value || '';
+                var ft = document.getElementById('bpClientTipo')?.value || '';
+                fd.filter_search = fs;
+                fd.filter_tipo = ft;
+            }
+
+            var f = document.getElementById('bpBulkMedia')?.files?.[0] || null;
+            if (f) fd.media_file = f;
+
+            BP.ajax('bp_app_action', fd).then(function(r) {
+                if (!r.success || !r.data?.job_id) {
+                    BP.toast(r.data?.message || 'Erro ao iniciar disparo.', 'error');
+                    return;
+                }
+                if ((r.data?.skipped_no_phone || 0) > 0) {
+                    BP.toast('Aviso: ' + r.data.skipped_no_phone + ' cliente(s) sem telefone válido foram ignorados.');
+                }
+                if (r.data?.capped) {
+                    BP.toast('Limite aplicado: apenas os primeiros 80 clientes desta rodada.');
+                }
+
+                var jobId = r.data.job_id;
+                var total = parseInt(r.data.total ?? 0, 10);
+
+                var timer = window.bpBulkTimer || null;
+                if (timer) clearInterval(timer);
+
+                timer = setInterval(function() {
+                    BP.ajax('bp_app_action', { sub: 'client_bulk_whatsapp_progress', job_id: jobId })
+                        .then(function(pr) {
+                            if (!pr.success) return;
+                            var d = pr.data || {};
+                            var pct = d.pct ?? 0;
+                            if (document.getElementById('bpBulkProgressText')) {
+                                document.getElementById('bpBulkProgressText').textContent =
+                                    'Enviando... ' + (d.sent ?? 0) + '/' + (d.total ?? total) +
+                                    ' (falhas: ' + (d.failed ?? 0) + ')';
+                            }
+                            if (document.getElementById('bpBulkProgressBar')) {
+                                document.getElementById('bpBulkProgressBar').style.width = pct + '%';
+                            }
+                            if (d.done) {
+                                clearInterval(timer);
+                                window.bpBulkTimer = null;
+                                BP.toast('Disparo concluído. Enviados: ' + (d.sent ?? 0) + ', falhas: ' + (d.failed ?? 0));
+                            }
+                        });
+                }, 1500);
+                window.bpBulkTimer = timer;
             });
         }
         </script>
@@ -254,6 +347,12 @@ trait BP_Sections_Clients {
 
                 <div class="bp-field" style="margin-bottom:12px">
                     <label style="font-size:.78rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Tipo de Cliente</label>
+                    <div style="margin-top:6px">
+                        <label style="font-size:.82rem;color:var(--text3);display:flex;align-items:center;gap:8px;cursor:pointer">
+                            <input type="checkbox" id="bpCRecorrenteSim" onchange="bpCRecorrenteToggle()">
+                            Cliente recorrente (sim/não)
+                        </label>
+                    </div>
                     <select id="bpCTipo" onchange="bpClientTipoChange()" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.9rem;margin-top:4px">
                         <option value="normal">👤 Normal</option>
                         <option value="vip">⭐ VIP</option>
@@ -271,11 +370,13 @@ trait BP_Sections_Clients {
                     <label style="font-size:.78rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Dias da semana (lembrete recorrente)</label>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
                         <?php
-                        $wd_lbl = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-                        for ( $w = 0; $w <= 6; $w++ ) :
+                        $wd_order = [1, 2, 3, 4, 5, 6, 0]; // seg..dom (0=dom)
+                        $wd_lbl   = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+                        for ( $i = 0; $i <= 6; $i++ ) :
+                            $w = $wd_order[$i];
                         ?>
                         <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer">
-                            <input type="checkbox" class="bpCWD" value="<?php echo (int) $w; ?>"> <?php echo esc_html( $wd_lbl[ $w ] ); ?>
+                            <input type="checkbox" class="bpCWD" value="<?php echo (int) $w; ?>"> <?php echo esc_html( $wd_lbl[ $i ] ); ?>
                         </label>
                         <?php endfor; ?>
                     </div>
@@ -335,8 +436,11 @@ trait BP_Sections_Clients {
             document.getElementById('bpCDias').value  = 30;
             document.getElementById('bpCPro').value   = '';
             document.getElementById('bpCNotes').value = '';
-            document.getElementById('bpCRecRow').style.display = 'none';
+            document.getElementById('bpCRecRow').style.display = 'none'; // dias corridos não é mais o modo principal
             document.getElementById('bpCWeekRow').style.display = 'none';
+            if (document.getElementById('bpCRecorrenteSim')) {
+                document.getElementById('bpCRecorrenteSim').checked = false;
+            }
             document.querySelectorAll('.bpCWD').forEach(function(ch){ ch.checked = false; });
             document.getElementById('bpClientModalTitle').textContent = id ? 'Editar Cliente' : 'Novo Cliente';
 
@@ -350,10 +454,7 @@ trait BP_Sections_Clients {
                     document.getElementById('bpCDias').value  = c.recorrencia_dias || 30;
                     document.getElementById('bpCPro').value   = c.professional_id || '';
                     document.getElementById('bpCNotes').value = c.notes;
-                    if (c.tipo === 'recorrente') {
-                        document.getElementById('bpCRecRow').style.display = '';
-                        document.getElementById('bpCWeekRow').style.display = '';
-                    }
+                    bpClientTipoChange();
                     if (c.recurrence_weekdays) {
                         String(c.recurrence_weekdays).split(',').forEach(function(d) {
                             document.querySelectorAll('.bpCWD').forEach(function(ch) {
@@ -373,8 +474,21 @@ trait BP_Sections_Clients {
         function bpClientTipoChange() {
             var v = document.getElementById('bpCTipo').value;
             var on = v === 'recorrente';
-            document.getElementById('bpCRecRow').style.display = on ? '' : 'none';
-            document.getElementById('bpCWeekRow').style.display = on ? '' : 'none';
+            var cb = document.getElementById('bpCRecorrenteSim');
+            if (cb) cb.checked = on;
+            if (document.getElementById('bpCRecRow')) {
+                document.getElementById('bpCRecRow').style.display = 'none';
+            }
+            if (document.getElementById('bpCWeekRow')) {
+                document.getElementById('bpCWeekRow').style.display = on ? '' : 'none';
+            }
+        }
+
+        function bpCRecorrenteToggle() {
+            var cb = document.getElementById('bpCRecorrenteSim');
+            if (!cb) return;
+            document.getElementById('bpCTipo').value = cb.checked ? 'recorrente' : 'normal';
+            bpClientTipoChange();
         }
 
         function bpRecWeekdaysCsv() {
@@ -406,21 +520,86 @@ trait BP_Sections_Clients {
         function bpBulkWhatsapp() {
             var msg = document.getElementById('bpBulkMsg').value.trim();
             if (!msg) { BP.toast('Digite a mensagem.', 'error'); return; }
-            var ids = bpBulkSelectedIds();
-            var msgC = ids.length
-                ? ('Enviar para ' + ids.length + ' cliente(s) selecionado(s)?')
-                : 'Enviar para toda a carteira deste módulo (com telefone)?';
-            if (!confirm(msgC)) return;
+            var delayInput = document.getElementById('bpBulkDelay');
+            var delayVal = parseInt(delayInput?.value || '0', 10);
+            if (isNaN(delayVal) || delayVal < 0 || delayVal > 120) {
+                BP.toast('Delay inválido. Use entre 0 e 120 segundos.', 'error');
+                return;
+            }
+            if (delayVal > 20 && !confirm('Delay alto (' + delayVal + 's). Confirmar disparo mesmo assim?')) {
+                return;
+            }
+
+            var wrap = document.getElementById('bpBulkProgressWrap');
+            if (wrap) wrap.style.display = '';
+            if (document.getElementById('bpBulkProgressText')) {
+                document.getElementById('bpBulkProgressText').textContent = 'Iniciando...';
+            }
+            if (document.getElementById('bpBulkProgressBar')) {
+                document.getElementById('bpBulkProgressBar').style.width = '0%';
+            }
+
+            var selectionMode = 'all';
+            var smEl = document.querySelector('input[name="bpBulkSelectionMode"]:checked');
+            if (smEl && smEl.value) selectionMode = smEl.value;
+
             var fd = {
-                sub: 'client_bulk_whatsapp',
+                sub: 'client_bulk_whatsapp_start',
                 company_id: document.getElementById('bpCCid').value,
                 message: msg,
-                delay_seconds: document.getElementById('bpBulkDelay').value
+                delay_seconds: delayVal,
+                selection_mode: selectionMode
             };
-            if (ids.length) fd.client_ids = JSON.stringify(ids);
+
+            if (selectionMode === 'filtered') {
+                fd.filter_search = document.getElementById('bpClientSearch')?.value || '';
+                fd.filter_tipo   = document.getElementById('bpClientTipo')?.value || '';
+            }
+
+            var f = document.getElementById('bpBulkMedia')?.files?.[0] || null;
+            if (f) fd.media_file = f;
+
             BP.ajax('bp_app_action', fd).then(function(r) {
-                if (r.success) BP.toast('Enviados: ' + (r.data?.sent ?? 0));
-                else BP.toast(r.data?.message || 'Erro', 'error');
+                if (!r.success || !r.data?.job_id) {
+                    BP.toast(r.data?.message || 'Erro ao iniciar disparo.', 'error');
+                    return;
+                }
+                if ((r.data?.skipped_no_phone || 0) > 0) {
+                    BP.toast('Aviso: ' + r.data.skipped_no_phone + ' cliente(s) sem telefone válido foram ignorados.');
+                }
+                if (r.data?.capped) {
+                    BP.toast('Limite aplicado: apenas os primeiros 80 clientes desta rodada.');
+                }
+
+                var jobId = r.data.job_id;
+                var total = parseInt(r.data.total ?? 0, 10);
+
+                var timer = window.bpBulkTimer || null;
+                if (timer) clearInterval(timer);
+
+                timer = setInterval(function() {
+                    BP.ajax('bp_app_action', { sub: 'client_bulk_whatsapp_progress', job_id: jobId })
+                        .then(function(pr) {
+                            if (!pr.success) return;
+                            var d = pr.data || {};
+                            var pct = d.pct ?? 0;
+                            if (document.getElementById('bpBulkProgressText')) {
+                                document.getElementById('bpBulkProgressText').textContent =
+                                    'Enviando... ' + (d.sent ?? 0) + '/' + (d.total ?? total) +
+                                    ' (falhas: ' + (d.failed ?? 0) + ')';
+                            }
+                            if (document.getElementById('bpBulkProgressBar')) {
+                                document.getElementById('bpBulkProgressBar').style.width = pct + '%';
+                            }
+                            if (d.done) {
+                                clearInterval(timer);
+                                window.bpBulkTimer = null;
+                                BP.toast('Disparo concluído. Enviados: ' + (d.sent ?? 0) + ', falhas: ' + (d.failed ?? 0));
+                            }
+                        });
+                }, 1500);
+
+                window.bpBulkTimer = timer;
             });
         }
 
@@ -437,7 +616,10 @@ trait BP_Sections_Clients {
                 phone:            phone,
                 email:            document.getElementById('bpCEmail').value,
                 tipo:             document.getElementById('bpCTipo').value,
-                recorrencia_dias: document.getElementById('bpCDias').value,
+                recorrencia_dias: (function(){
+                    var cb = document.getElementById('bpCRecorrenteSim');
+                    return (cb && cb.checked) ? 0 : document.getElementById('bpCDias').value;
+                })(),
                 recurrence_weekdays: bpRecWeekdaysCsv(),
                 professional_id:  document.getElementById('bpCPro').value,
                 notes:            document.getElementById('bpCNotes').value,

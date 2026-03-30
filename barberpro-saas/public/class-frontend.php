@@ -21,9 +21,8 @@ class BarberPro_Frontend {
      */
     public static function compute_app_modules( WP_User $wp_user, string $panel_mode = 'full' ): array {
         $panel_mode = $panel_mode === 'bar' ? 'bar' : 'full';
-        if ( $panel_mode === 'bar' && BarberPro_Modules::is_active( 'bar' ) ) {
-            return [ 'bar' => true ];
-        }
+        // IMPORTANTE: o `panel_mode` só deve controlar a "seção de início" (ex: abrir no caixa),
+        // mas NÃO pode ocultar módulos (senão abas como `*_clientes` somem no painel).
         $active_mods = [];
         $allowed     = get_user_meta( $wp_user->ID, 'barberpro_modules', true ) ?: [];
         $is_admin    = user_can( $wp_user, 'manage_options' );

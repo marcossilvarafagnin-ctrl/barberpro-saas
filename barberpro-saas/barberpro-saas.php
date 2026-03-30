@@ -41,6 +41,7 @@ require_once BARBERPRO_PLUGIN_DIR . 'includes/class-pwa.php';
 require_once BARBERPRO_PLUGIN_DIR . 'includes/class-whatsapp-bot.php';
 require_once BARBERPRO_PLUGIN_DIR . 'includes/class-widget-chat.php';
 require_once BARBERPRO_PLUGIN_DIR . 'includes/class-app-ajax.php';
+require_once BARBERPRO_PLUGIN_DIR . 'includes/class-bulk-whatsapp.php';
 
 register_activation_hook(   __FILE__, [ 'BarberPro_Installer', 'activate' ] );
 register_deactivation_hook( __FILE__, [ 'BarberPro_Installer', 'deactivate' ] );
@@ -102,6 +103,7 @@ new BarberPro_App_Ajax();
             BarberPro_WhatsApp::schedule_reminders();
             BarberPro_Kanban_Auto::schedule();
             BarberPro_Automation::init(); // Fila de mensagens + automações
+            add_action( 'barberpro_bulk_wa_tick', [ 'BarberPro_Bulk_WhatsApp', 'tick' ] );
             BarberPro_Shop::install_tables();
             BarberPro_Installer::maybe_migrate(); // garante colunas em instâncias existentes
             // maybe_flush DEVE rodar dentro do hook 'init' para que $wp_rewrite esteja pronto

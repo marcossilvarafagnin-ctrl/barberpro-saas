@@ -364,6 +364,8 @@ class BarberPro_App_Ajax {
             case 'save_client':           $this->action_save_client();           break;
             case 'save_absence_settings': $this->action_save_absence_settings(); break;
             case 'client_bulk_whatsapp':  $this->action_client_bulk_whatsapp();  break;
+            case 'client_bulk_whatsapp_start':    $this->action_client_bulk_whatsapp_start();    break;
+            case 'client_bulk_whatsapp_progress': $this->action_client_bulk_whatsapp_progress(); break;
             case 'get_loja_produto_form': $this->action_get_loja_produto_form(); break;
             case 'save_loja_produto':     $this->action_save_loja_produto();     break;
             case 'get_loja_pedido_detalhe': $this->action_get_loja_pedido_detalhe(); break;
