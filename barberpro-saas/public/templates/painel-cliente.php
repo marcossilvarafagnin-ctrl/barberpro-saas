@@ -57,11 +57,23 @@ $now         = current_time( 'timestamp' );
                     <p><small><?php esc_html_e( 'Código:', 'barberpro-saas' ); ?> <code><?php echo esc_html( $b->booking_code ); ?></code></small></p>
                 </div>
                 <?php if ( $can_cancel ) : ?>
-                <div class="bp-booking-actions">
-                    <button class="bp-btn bp-btn-danger bp-cancel-booking"
+                <div class="bp-booking-actions" style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                        <label style="font-size:.8rem;color:#666"><?php esc_html_e( 'Remarcar:', 'barberpro-saas' ); ?></label>
+                        <input type="date" class="bp-rs-date" value="<?php echo esc_attr( $b->booking_date ); ?>"
+                               style="padding:6px;border:1px solid #ddd;border-radius:6px">
+                        <input type="time" class="bp-rs-time" value="<?php echo esc_attr( substr( $b->booking_time, 0, 5 ) ); ?>"
+                               style="padding:6px;border:1px solid #ddd;border-radius:6px">
+                        <button type="button" class="bp-btn bp-btn-primary bp-reschedule-submit"
+                                data-id="<?php echo esc_attr( $b->id ); ?>"
+                                data-nonce="<?php echo esc_attr( wp_create_nonce( 'barberpro_booking' ) ); ?>">
+                            <?php esc_html_e( 'Salvar nova data', 'barberpro-saas' ); ?>
+                        </button>
+                    </div>
+                    <button type="button" class="bp-btn bp-btn-danger bp-cancel-booking"
                             data-id="<?php echo esc_attr( $b->id ); ?>"
                             data-nonce="<?php echo esc_attr( wp_create_nonce( 'barberpro_booking' ) ); ?>">
-                        <?php esc_html_e( 'Cancelar', 'barberpro-saas' ); ?>
+                        <?php esc_html_e( 'Cancelar agendamento', 'barberpro-saas' ); ?>
                     </button>
                 </div>
                 <?php endif; ?>

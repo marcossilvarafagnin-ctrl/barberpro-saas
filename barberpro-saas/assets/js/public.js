@@ -482,4 +482,40 @@
 
     $(document).ready(function () { BP.init(); });
 
+    // Painel do cliente — cancelar / remarcar ([barberpro_painel_cliente])
+    $(document).on('click', '.bp-cancel-booking', function () {
+        if (typeof barberproPublic === 'undefined') return;
+        if (!confirm(barberproPublic.i18n.confirm_cancel || 'Cancelar este agendamento?')) return;
+        var id = $(this).data('id');
+        var nonce = $(this).data('nonce');
+        $.post(barberproPublic.ajaxUrl, {
+            action: 'barberpro_cancel_booking',
+            nonce: nonce,
+            booking_id: id
+        }).done(function (res) {
+            if (res.success) location.reload();
+            else alert(res.data && res.data.message ? res.data.message : 'Erro ao cancelar.');
+        });
+    });
+
+    $(document).on('click', '.bp-reschedule-submit', function () {
+        if (typeof barberproPublic === 'undefined') return;
+        var $card = $(this).closest('.bp-booking-card');
+        var id = $(this).data('id');
+        var nonce = $(this).data('nonce');
+        var d = $card.find('.bp-rs-date').val();
+        var t = $card.find('.bp-rs-time').val();
+        if (!d || !t) { alert('Informe data e horário.'); return; }
+        $.post(barberproPublic.ajaxUrl, {
+            action: 'barberpro_reschedule_booking',
+            nonce: nonce,
+            booking_id: id,
+            booking_date: d,
+            booking_time: t
+        }).done(function (res) {
+            if (res.success) location.reload();
+            else alert(res.data && res.data.message ? res.data.message : 'Não foi possível remarcar.');
+        });
+    });
+
 })(jQuery);

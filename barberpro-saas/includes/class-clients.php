@@ -86,24 +86,33 @@ class BarberPro_Clients {
 
         $recorrencia_dias = ! empty($data['recorrencia_dias']) ? absint($data['recorrencia_dias']) : null;
         $pro_id           = ! empty($data['professional_id'])  ? absint($data['professional_id'])  : null;
+        $weekdays_csv     = self::normalize_weekdays_csv( $data['recurrence_weekdays'] ?? '' );
 
         $clean = [
-            'name'             => sanitize_text_field( $data['name'] ?? '' ),
-            'phone'            => self::normalize_phone( $data['phone'] ?? '' ),
-            'email'            => sanitize_email( $data['email'] ?? '' ),
-            'tipo'             => in_array($data['tipo']??'normal', ['normal','vip','recorrente']) ? $data['tipo'] : 'normal',
-            'recorrencia_dias' => $recorrencia_dias,
-            'professional_id'  => $pro_id,
-            'notes'            => sanitize_textarea_field( $data['notes'] ?? '' ),
-            'updated_at'       => current_time('mysql'),
+            'name'                 => sanitize_text_field( $data['name'] ?? '' ),
+            'phone'                => self::normalize_phone( $data['phone'] ?? '' ),
+            'email'                => sanitize_email( $data['email'] ?? '' ),
+            'tipo'                 => in_array($data['tipo']??'normal', ['normal','vip','recorrente']) ? $data['tipo'] : 'normal',
+            'recorrencia_dias'     => $recorrencia_dias,
+            'recurrence_weekdays'  => $weekdays_csv,
+            'professional_id'      => $pro_id,
+            'notes'                => sanitize_textarea_field( $data['notes'] ?? '' ),
+            'updated_at'           => current_time('mysql'),
         ];
 
-        // Calcula próximo lembrete se recorrente
-        if ( $clean['tipo'] === 'recorrente' && $recorrencia_dias ) {
+        // Calcula próximo lembrete se recorrente (dias corridos e/ou dias da semana)
+        if ( $clean['tipo'] === 'recorrente' ) {
             $base = $data['last_visit'] ?? current_time('Y-m-d');
-            $clean['next_reminder'] = date('Y-m-d', strtotime($base . " +{$recorrencia_dias} days"));
+            if ( $weekdays_csv ) {
+                $clean['next_reminder'] = self::next_reminder_from_weekdays( $base, $weekdays_csv );
+            } elseif ( $recorrencia_dias ) {
+                $clean['next_reminder'] = date('Y-m-d', strtotime($base . " +{$recorrencia_dias} days"));
+            } else {
+                $clean['next_reminder'] = null;
+            }
         } else {
             $clean['next_reminder'] = null;
+            $clean['recurrence_weekdays'] = null;
         }
 
         if ( $id ) {
@@ -125,10 +134,15 @@ class BarberPro_Clients {
         $client = self::get_by_phone($phone, $company_id);
         if ( ! $client ) return;
 
-        $recorrencia = (int)($client->recorrencia_dias ?? 0);
-        $next        = $recorrencia > 0
-            ? date('Y-m-d', strtotime($date . " +{$recorrencia} days"))
-            : null;
+        $weeks = isset( $client->recurrence_weekdays ) ? (string) $client->recurrence_weekdays : '';
+        if ( $weeks !== '' && $client->tipo === 'recorrente' ) {
+            $next = self::next_reminder_from_weekdays( $date, $weeks );
+        } else {
+            $recorrencia = (int)($client->recorrencia_dias ?? 0);
+            $next        = $recorrencia > 0
+                ? date('Y-m-d', strtotime($date . " +{$recorrencia} days"))
+                : null;
+        }
 
         $wpdb->update(
             "{$wpdb->prefix}barber_clients",
@@ -174,23 +188,156 @@ class BarberPro_Clients {
 
             // Atualiza next_reminder para o próximo ciclo
             global $wpdb;
-            $dias = (int)$c->recorrencia_dias;
-            if ( $dias > 0 ) {
+            $weeks = isset( $c->recurrence_weekdays ) ? (string) $c->recurrence_weekdays : '';
+            if ( $weeks !== '' ) {
+                $prox = self::next_reminder_from_weekdays( $hoje, $weeks );
                 $wpdb->update(
                     "{$wpdb->prefix}barber_clients",
-                    ['next_reminder' => date('Y-m-d', strtotime($hoje . " +{$dias} days"))],
+                    ['next_reminder' => $prox],
+                    ['id' => $c->id]
+                );
+            } else {
+                $dias = (int)$c->recorrencia_dias;
+                if ( $dias > 0 ) {
+                    $wpdb->update(
+                        "{$wpdb->prefix}barber_clients",
+                        ['next_reminder' => date('Y-m-d', strtotime($hoje . " +{$dias} days"))],
+                        ['id' => $c->id]
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Mensagem de ausência: clientes sem agendamento há X dias (W-API / WhatsApp).
+     */
+    public static function send_absence_reminders(): void {
+        if ( BarberPro_Database::get_setting( 'absence_reminder_active', '0' ) !== '1' ) {
+            return;
+        }
+        $days = max( 1, (int) BarberPro_Database::get_setting( 'absence_reminder_days', '30' ) );
+        $tpl  = BarberPro_Database::get_setting(
+            'absence_reminder_msg',
+            'Olá, {nome}! Sentimos sua falta na {negocio} 💈 Faz um tempinho que não vemos você por aqui. Que tal agendar? {link}'
+        );
+        global $wpdb;
+        $hoje = current_time('Y-m-d' );
+        $neg  = BarberPro_Database::get_setting( 'module_barbearia_name', get_bloginfo('name') );
+        $link = BarberPro_Database::get_setting( 'booking_page_url', home_url( '/agendamento/' ) );
+
+        $targets = [];
+        if ( BarberPro_Database::get_setting( 'module_barbearia_active', '1' ) === '1' ) {
+            $targets[] = [ 'company_id' => 1, 'negocio' => $neg ];
+        }
+        if ( BarberPro_Database::get_setting( 'module_lavacar_active', '0' ) === '1' ) {
+            $targets[] = [
+                'company_id' => 2,
+                'negocio'    => BarberPro_Database::get_setting( 'module_lavacar_name', 'Lava-Car' ),
+            ];
+        }
+        if ( class_exists( 'BarberPro_Modules' ) && BarberPro_Modules::is_active( 'bar' ) ) {
+            $bar_cid = BarberPro_Modules::company_id( 'bar' );
+            $bar_nm  = trim( (string) BarberPro_Database::get_setting( 'business_name', '' ) ) ?: 'Bar / Eventos';
+            $targets[] = [ 'company_id' => $bar_cid, 'negocio' => $bar_nm ];
+        }
+
+        foreach ( $targets as $t ) {
+            $company_id = (int) $t['company_id'];
+            $neg_m      = $t['negocio'];
+
+            $clientes = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT c.* FROM {$wpdb->prefix}barber_clients c
+                     WHERE c.company_id = %d AND c.phone != ''
+                       AND c.tipo != 'vip'
+                       AND (
+                         c.last_visit IS NULL
+                         OR DATEDIFF( %s, c.last_visit ) >= %d
+                       )
+                       AND ( c.last_absence_sent IS NULL OR DATEDIFF( %s, c.last_absence_sent ) >= 14 )
+                     LIMIT 40",
+                    $company_id,
+                    $hoje,
+                    $days,
+                    $hoje
+                )
+            ) ?: [];
+
+            foreach ( $clientes as $c ) {
+                $has_recent = (int) $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT COUNT(*) FROM {$wpdb->prefix}barber_bookings
+                         WHERE company_id = %d AND status NOT IN ('cancelado','recusado')
+                           AND REPLACE(REPLACE(REPLACE(REPLACE(client_phone,' ',''),'-',''),'(',''),')','') LIKE %s
+                           AND booking_date >= DATE_SUB(%s, INTERVAL %d DAY)",
+                        $company_id,
+                        '%' . $wpdb->esc_like( self::normalize_phone( $c->phone ) ) . '%',
+                        $hoje,
+                        $days
+                    )
+                );
+                if ( $has_recent > 0 ) {
+                    continue;
+                }
+
+                $msg = str_replace(
+                    ['{nome}', '{negocio}', '{link}'],
+                    [$c->name, $neg_m, $link],
+                    $tpl
+                );
+                BarberPro_WhatsApp::send( $c->phone, $msg );
+                $wpdb->update(
+                    "{$wpdb->prefix}barber_clients",
+                    ['last_absence_sent' => $hoje, 'updated_at' => current_time( 'mysql' )],
                     ['id' => $c->id]
                 );
             }
         }
     }
 
+    /** CSV 0=Dom … 6=Sáb */
+    public static function normalize_weekdays_csv( string $raw ): string {
+        $parts = array_filter( array_map( 'intval', explode( ',', $raw ) ) );
+        $parts = array_values( array_unique( array_filter( $parts, static function ( $d ) {
+            return $d >= 0 && $d <= 6;
+        } ) ) );
+        sort( $parts );
+        return $parts ? implode( ',', $parts ) : '';
+    }
+
+    /** Próxima data (Y-m-d) a partir de $after_date que caia em um dos dias da semana. */
+    public static function next_reminder_from_weekdays( string $after_date, string $weekdays_csv ): string {
+        $dows = array_map( 'intval', explode( ',', self::normalize_weekdays_csv( $weekdays_csv ) ) );
+        if ( empty( $dows ) ) {
+            return $after_date;
+        }
+        try {
+            $tz = function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'America/Sao_Paulo' );
+            $d  = new DateTimeImmutable( $after_date . ' 12:00:00', $tz );
+            $d  = $d->modify( '+1 day' );
+            for ( $i = 0; $i < 21; $i++ ) {
+                $w = (int) $d->format( 'w' );
+                if ( in_array( $w, $dows, true ) ) {
+                    return $d->format( 'Y-m-d' );
+                }
+                $d = $d->modify( '+1 day' );
+            }
+            return $d->format( 'Y-m-d' );
+        } catch ( \Exception $e ) {
+            return date( 'Y-m-d', strtotime( $after_date . ' +7 days' ) );
+        }
+    }
+
     private static function send_reminder_whatsapp( object $c ): void {
         $link = ! empty($c->booking_url) ? "\n\n📅 Agende: {$c->booking_url}" : '';
         $pro  = ! empty($c->pro_name) ? "\n👤 Seu profissional: {$c->pro_name}" : '';
+        $linha = (int) ( $c->recorrencia_dias ?? 0 ) > 0
+            ? "Faz {$c->recorrencia_dias} dias desde seu último atendimento."
+            : 'Tá na hora de marcar seu retorno por aqui! ✂️';
         $msg  = "Olá, *{$c->name}*! 👋\n\n"
               . "Tá na hora de uma visita! ✂️\n"
-              . "Faz {$c->recorrencia_dias} dias desde seu último atendimento."
+              . $linha
               . $pro
               . $link
               . "\n\nTe esperamos! 😊";
@@ -215,10 +362,28 @@ class BarberPro_Clients {
             (int)($data['company_id'] ?? 1),
             $data['client_email'] ?? ''
         );
+        if ( $client && is_email( $data['client_email'] ?? '' ) ) {
+            global $wpdb;
+            $wpdb->update(
+                "{$wpdb->prefix}barber_clients",
+                [
+                    'name'       => sanitize_text_field( $data['client_name'] ),
+                    'email'      => sanitize_email( $data['client_email'] ),
+                    'updated_at' => current_time( 'mysql' ),
+                ],
+                ['id' => $client->id]
+            );
+        }
 
-        // Cria usuário WordPress se o cliente tem e-mail e ainda não tem conta
-        if ( ! empty($data['client_email']) && is_email($data['client_email']) ) {
-            self::maybe_create_wp_user( $client, $data );
+        $email_in = sanitize_email( $data['client_email'] ?? '' );
+        $data_wp  = $data;
+        if ( ! is_email( $email_in ) && BarberPro_Database::get_setting( 'client_wp_synthetic_email', '1' ) === '1' ) {
+            $host = parse_url( home_url(), PHP_URL_HOST ) ?: 'site.local';
+            $host = preg_replace( '/^www\./', '', $host );
+            $data_wp['client_email'] = 'cliente.' . self::normalize_phone( $data['client_phone'] ) . '@noemail.' . $host;
+        }
+        if ( is_email( $data_wp['client_email'] ?? '' ) ) {
+            self::maybe_create_wp_user( $client, $data_wp );
         }
     }
 

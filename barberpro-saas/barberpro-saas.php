@@ -136,6 +136,7 @@ new BarberPro_App_Ajax();
         add_action( 'barberpro_booking_created', 'barberpro_on_booking_created', 10, 2 );
         add_action( 'barberpro_booking_finished', 'barberpro_on_booking_finished', 10, 1 );
         add_action( 'barberpro_daily_reminders', 'barberpro_send_client_reminders' );
+        add_action( 'barberpro_daily_reminders', 'barberpro_send_client_absence_reminders', 20 );
         if ( ! wp_next_scheduled('barberpro_daily_reminders') ) {
             wp_schedule_event( strtotime('08:00:00'), 'daily', 'barberpro_daily_reminders' );
         }
@@ -187,6 +188,29 @@ function bp_get_payment_methods(): array {
         }
     }
     return $active ?: $all; // fallback: todos, se nada configurado
+}
+
+/**
+ * Há pelo menos uma forma de pagamento (presencial configurada ou gateway online ativo)?
+ * Usado pelo widget/WhatsApp para pular a etapa de pagamento quando não há nada configurado.
+ */
+function bp_has_any_payment_method_configured(): bool {
+    $when = BarberPro_Database::get_setting( 'online_payment_when', 'optional' );
+    if ( class_exists( 'BarberPro_Payment' ) ) {
+        $gw = BarberPro_Payment::get_active_gateways();
+        if ( ! empty( $gw ) && $when !== 'disabled' ) {
+            return true;
+        }
+    }
+    $keys     = [ 'dinheiro', 'pix', 'cartao_debito', 'cartao_credito', 'transferencia', 'voucher', 'boleto', 'outro' ];
+    $defaults = [ 'dinheiro', 'pix', 'cartao_debito', 'cartao_credito' ];
+    foreach ( $keys as $k ) {
+        $def = in_array( $k, $defaults, true ) ? '1' : '0';
+        if ( BarberPro_Database::get_setting( 'pay_method_' . $k, $def ) === '1' ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -422,6 +446,12 @@ function barberpro_on_booking_finished( object $booking ): void {
 function barberpro_send_client_reminders(): void {
     if ( class_exists('BarberPro_Clients') ) {
         BarberPro_Clients::send_recurrence_reminders();
+    }
+}
+
+function barberpro_send_client_absence_reminders(): void {
+    if ( class_exists('BarberPro_Clients') ) {
+        BarberPro_Clients::send_absence_reminders();
     }
 }
 

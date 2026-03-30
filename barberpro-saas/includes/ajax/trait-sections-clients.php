@@ -8,7 +8,7 @@ trait BP_Sections_Clients {
 
     // ── Listagem de clientes ──────────────────────────────────
     private function section_clientes( int $company_id ): void {
-        $mod      = $company_id === 1 ? 'barbearia' : 'lavacar';
+        $mod      = $company_id === 1 ? 'barbearia' : ( $company_id === 2 ? 'lavacar' : 'bar' );
         $search   = sanitize_text_field($_POST['search'] ?? '');
         $tipo_f   = sanitize_key($_POST['tipo'] ?? '');
         $clientes = BarberPro_Clients::list($company_id, $search, $tipo_f);
@@ -39,13 +39,44 @@ trait BP_Sections_Clients {
             </select>
         </div>
 
+        <?php
+        $abs_on   = BarberPro_Database::get_setting( 'absence_reminder_active', '0' ) === '1';
+        $abs_days = (int) BarberPro_Database::get_setting( 'absence_reminder_days', '30' );
+        $abs_msg  = BarberPro_Database::get_setting( 'absence_reminder_msg', 'Olá, {nome}! Sentimos sua falta na {negocio} 💈 Que tal agendar? {link}' );
+        $mod_lbl  = $company_id === 1 ? 'Barbearia' : ( $company_id === 2 ? 'Lava-Car' : 'Bar / Eventos' );
+        ?>
+        <div class="bp-card bp-animate-in" style="margin-bottom:14px;padding:14px;border:1px solid var(--border);border-radius:12px">
+            <div style="font-weight:800;margin-bottom:6px">📳 Mensagem de ausência (WhatsApp / W-API) — <?php echo esc_html( $mod_lbl ); ?></div>
+            <p style="font-size:.76rem;color:var(--text3);margin:0 0 10px">Disparo diário: clientes na carteira sem agendamento há X dias. Máx. 1 envio a cada 14 dias por cliente. Variáveis: <code>{nome}</code> <code>{negocio}</code> <code>{link}</code></p>
+            <label style="font-size:.85rem"><input type="checkbox" id="bpAbsActive" value="1" <?php checked( $abs_on ); ?>> Ativar</label>
+            <label style="font-size:.85rem;margin-left:12px">Dias sem agendar: <input type="number" id="bpAbsDays" value="<?php echo esc_attr( (string) $abs_days ); ?>" min="7" max="365" style="width:64px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text1)"></label>
+            <textarea id="bpAbsMsg" rows="2" style="width:100%;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.85rem"><?php echo esc_textarea( $abs_msg ); ?></textarea>
+            <button type="button" class="bp-btn bp-btn-primary bp-btn-sm" style="margin-top:8px" onclick="bpSaveAbsence()">Salvar configuração de ausência</button>
+        </div>
+
+        <div class="bp-card bp-animate-in" style="margin-bottom:14px;padding:14px;border:1px solid var(--border);border-radius:12px">
+            <div style="font-weight:800;margin-bottom:6px">📢 Envio em massa (carteira — <?php echo esc_html( $mod_lbl ); ?>)</div>
+            <p style="font-size:.76rem;color:var(--text3);margin:0 0 8px">Mensagem para todos os clientes listados abaixo. Delay entre envios (aquecimento de número). Limite 80 por rodada.</p>
+            <textarea id="bpBulkMsg" rows="3" placeholder="Olá {nome}! ..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.85rem"></textarea>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+                <label style="font-size:.8rem">Delay (s) <input type="number" id="bpBulkDelay" value="4" min="0" max="120" style="width:56px;padding:4px;border-radius:6px;border:1px solid var(--border)"></label>
+                <button type="button" class="bp-btn bp-btn-primary bp-btn-sm" onclick="bpBulkWhatsapp()">Enviar para carteira</button>
+            </div>
+        </div>
+
+        <?php if ( $mod === 'bar' ) : ?>
+        <p style="font-size:.72rem;color:var(--text3);margin:0 0 10px"><strong>Bar / Eventos:</strong> a carteira é independente das comandas. Use ausência e envio em massa para fidelizar quem você cadastra aqui (ex.: após eventos ou reservas).</p>
+        <?php else : ?>
+        <p style="font-size:.72rem;color:var(--text3);margin:0 0 10px"><strong>Loja Virtual:</strong> o disparo usa só quem está nesta carteira (<?php echo esc_html( $mod_lbl ); ?>). Clientes que compraram só pela loja entram na lista se também estiverem cadastrados aqui.</p>
+        <?php endif; ?>
+
         <!-- Lista -->
         <div id="bpClientList" class="bp-animate-in">
         <?php if (empty($clientes)): ?>
             <div style="text-align:center;padding:40px;color:var(--text3)">
                 <div style="font-size:2.5rem;margin-bottom:10px">👥</div>
                 <div>Nenhum cliente cadastrado ainda.</div>
-                <div style="font-size:.8rem;margin-top:6px">Os clientes são criados automaticamente ao agendar pelo chat ou site.</div>
+                <div style="font-size:.8rem;margin-top:6px"><?php echo $mod === 'bar' ? 'Cadastre manualmente ou importe contatos para usar ausência e envio em massa.' : 'Os clientes são criados automaticamente ao agendar pelo chat ou site.'; ?></div>
             </div>
         <?php else: ?>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
@@ -139,10 +170,24 @@ trait BP_Sections_Clients {
                 </div>
 
                 <div id="bpCRecRow" style="display:none;margin-bottom:12px">
-                    <label style="font-size:.78rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Intervalo de retorno (dias)</label>
+                    <label style="font-size:.78rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Intervalo de retorno (dias corridos)</label>
                     <input type="number" id="bpCDias" min="1" max="365" value="30"
                            style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.9rem;margin-top:4px">
-                    <div style="font-size:.73rem;color:var(--text3);margin-top:4px">O cliente receberá um lembrete automático via WhatsApp após esse prazo.</div>
+                    <div style="font-size:.73rem;color:var(--text3);margin-top:4px">Lembrete após N dias da última visita (se não usar dias da semana abaixo).</div>
+                </div>
+                <div id="bpCWeekRow" style="display:none;margin-bottom:12px">
+                    <label style="font-size:.78rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Dias da semana (lembrete recorrente)</label>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+                        <?php
+                        $wd_lbl = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+                        for ( $w = 0; $w <= 6; $w++ ) :
+                        ?>
+                        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer">
+                            <input type="checkbox" class="bpCWD" value="<?php echo (int) $w; ?>"> <?php echo esc_html( $wd_lbl[ $w ] ); ?>
+                        </label>
+                        <?php endfor; ?>
+                    </div>
+                    <div style="font-size:.73rem;color:var(--text3);margin-top:4px">Opcional: o próximo lembrete cai no primeiro desses dias após a última visita.</div>
                 </div>
 
                 <div class="bp-field" style="margin-bottom:12px">
@@ -171,6 +216,7 @@ trait BP_Sections_Clients {
             return [
                 'id'=>(int)$c->id,'name'=>$c->name,'phone'=>$c->phone,'email'=>$c->email??'',
                 'tipo'=>$c->tipo,'recorrencia_dias'=>(int)($c->recorrencia_dias??0),
+                'recurrence_weekdays'=>$c->recurrence_weekdays??'',
                 'professional_id'=>(int)($c->professional_id??0),'notes'=>$c->notes??''
             ];
         }, $clientes)); ?>;
@@ -196,6 +242,8 @@ trait BP_Sections_Clients {
             document.getElementById('bpCPro').value   = '';
             document.getElementById('bpCNotes').value = '';
             document.getElementById('bpCRecRow').style.display = 'none';
+            document.getElementById('bpCWeekRow').style.display = 'none';
+            document.querySelectorAll('.bpCWD').forEach(function(ch){ ch.checked = false; });
             document.getElementById('bpClientModalTitle').textContent = id ? 'Editar Cliente' : 'Novo Cliente';
 
             if (id) {
@@ -208,8 +256,17 @@ trait BP_Sections_Clients {
                     document.getElementById('bpCDias').value  = c.recorrencia_dias || 30;
                     document.getElementById('bpCPro').value   = c.professional_id || '';
                     document.getElementById('bpCNotes').value = c.notes;
-                    if (c.tipo === 'recorrente')
+                    if (c.tipo === 'recorrente') {
                         document.getElementById('bpCRecRow').style.display = '';
+                        document.getElementById('bpCWeekRow').style.display = '';
+                    }
+                    if (c.recurrence_weekdays) {
+                        String(c.recurrence_weekdays).split(',').forEach(function(d) {
+                            document.querySelectorAll('.bpCWD').forEach(function(ch) {
+                                if (ch.value === String(parseInt(d,10))) ch.checked = true;
+                            });
+                        });
+                    }
                 }
             }
             document.getElementById('bpClientModal').style.display = 'flex';
@@ -221,7 +278,42 @@ trait BP_Sections_Clients {
 
         function bpClientTipoChange() {
             var v = document.getElementById('bpCTipo').value;
-            document.getElementById('bpCRecRow').style.display = v === 'recorrente' ? '' : 'none';
+            var on = v === 'recorrente';
+            document.getElementById('bpCRecRow').style.display = on ? '' : 'none';
+            document.getElementById('bpCWeekRow').style.display = on ? '' : 'none';
+        }
+
+        function bpRecWeekdaysCsv() {
+            var a = [];
+            document.querySelectorAll('.bpCWD:checked').forEach(function(ch){ a.push(ch.value); });
+            return a.join(',');
+        }
+
+        function bpSaveAbsence() {
+            BP.ajax('bp_app_action', {
+                sub: 'save_absence_settings',
+                absence_active: document.getElementById('bpAbsActive').checked ? '1' : '',
+                absence_days: document.getElementById('bpAbsDays').value,
+                absence_msg: document.getElementById('bpAbsMsg').value
+            }).then(function(r) {
+                if (r.success) BP.toast('Configuração de ausência salva!');
+                else BP.toast(r.data?.message || 'Erro', 'error');
+            });
+        }
+
+        function bpBulkWhatsapp() {
+            var msg = document.getElementById('bpBulkMsg').value.trim();
+            if (!msg) { BP.toast('Digite a mensagem.', 'error'); return; }
+            if (!confirm('Enviar para todos os clientes da carteira deste módulo?')) return;
+            BP.ajax('bp_app_action', {
+                sub: 'client_bulk_whatsapp',
+                company_id: document.getElementById('bpCCid').value,
+                message: msg,
+                delay_seconds: document.getElementById('bpBulkDelay').value
+            }).then(function(r) {
+                if (r.success) BP.toast('Enviados: ' + (r.data?.sent ?? 0));
+                else BP.toast(r.data?.message || 'Erro', 'error');
+            });
         }
 
         function bpSaveClient() {
@@ -238,13 +330,15 @@ trait BP_Sections_Clients {
                 email:            document.getElementById('bpCEmail').value,
                 tipo:             document.getElementById('bpCTipo').value,
                 recorrencia_dias: document.getElementById('bpCDias').value,
+                recurrence_weekdays: bpRecWeekdaysCsv(),
                 professional_id:  document.getElementById('bpCPro').value,
                 notes:            document.getElementById('bpCNotes').value,
             }).then(function(r) {
                 if (r.success) {
                     bpCloseClientModal();
                     BP.toast('Cliente salvo!');
-                    var prefix = parseInt(document.getElementById('bpCCid').value) === 1 ? 'barbearia' : 'lavacar';
+                    var cid = parseInt(document.getElementById('bpCCid').value, 10);
+                    var prefix = cid === 1 ? 'barbearia' : (cid === 2 ? 'lavacar' : 'bar');
                     BP.navigate(prefix+'_clientes');
                 } else {
                     BP.toast(r.data?.message || 'Erro ao salvar.', 'error');

@@ -24,6 +24,7 @@ class BarberPro_Frontend {
         add_action( 'wp_ajax_barberpro_create_booking',        [ $this, 'ajax_create_booking' ] );
         add_action( 'wp_ajax_nopriv_barberpro_create_booking', [ $this, 'ajax_create_booking' ] );
         add_action( 'wp_ajax_barberpro_cancel_booking',        [ $this, 'ajax_cancel_booking' ] );
+        add_action( 'wp_ajax_barberpro_reschedule_booking',      [ $this, 'ajax_reschedule_booking' ] );
     }
 
     /**
@@ -449,9 +450,8 @@ bpAuthTab('register', document.querySelectorAll('.bp-auth-tab')[1]);
         }
 
         $user     = wp_get_current_user();
-        $bookings = BarberPro_Database::get_bookings([
-            'client_email' => $user->user_email,
-        ]);
+        $phone    = preg_replace( '/\D/', '', (string) get_user_meta( $user->ID, 'billing_phone', true ) );
+        $bookings = BarberPro_Database::get_bookings_for_client( $user->user_email, $phone );
 
         $tpl = BARBERPRO_PLUGIN_DIR . 'public/templates/painel-cliente.php';
         if ( ! file_exists($tpl) ) {
@@ -692,5 +692,65 @@ bpAuthTab('register', document.querySelectorAll('.bp-auth-tab')[1]);
         }
 
         wp_send_json_success( ['message' => 'Agendamento cancelado.'] );
+    }
+
+    /**
+     * Cliente remarca data/horário (mantém serviço e profissional).
+     */
+    public function ajax_reschedule_booking(): void {
+        check_ajax_referer( 'barberpro_booking', 'nonce' );
+
+        if ( ! is_user_logged_in() ) {
+            wp_send_json_error( ['message' => 'Login necessário.'] );
+        }
+
+        $booking_id = (int) ( $_POST['booking_id'] ?? 0 );
+        $new_date   = sanitize_text_field( $_POST['booking_date'] ?? '' );
+        $new_time   = sanitize_text_field( $_POST['booking_time'] ?? '' );
+        if ( ! $booking_id || ! $new_date || ! $new_time ) {
+            wp_send_json_error( ['message' => 'Dados incompletos.'] );
+        }
+
+        $booking = BarberPro_Database::get_booking( $booking_id );
+        if ( ! $booking ) {
+            wp_send_json_error( ['message' => 'Agendamento não encontrado.'] );
+        }
+
+        $user = wp_get_current_user();
+        $phone = preg_replace( '/\D/', '', (string) get_user_meta( $user->ID, 'billing_phone', true ) );
+        $ok_email = is_email( $user->user_email ) && $booking->client_email === $user->user_email;
+        $ok_phone = $phone && str_contains( preg_replace( '/\D/', '', $booking->client_phone ), $phone );
+        if ( ! $ok_email && ! $ok_phone && ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( ['message' => 'Sem permissão.'] );
+        }
+
+        $cancel_hours = (int) BarberPro_Database::get_setting( 'cancellation_hours', 2 );
+        $booking_ts   = strtotime( $booking->booking_date . ' ' . $booking->booking_time );
+        if ( $booking_ts - time() < $cancel_hours * 3600 ) {
+            wp_send_json_error( ['message' => "Remarcação só com {$cancel_hours}h de antecedência."] );
+        }
+
+        if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $new_date ) || strtotime( $new_date ) < strtotime( current_time( 'Y-m-d' ) ) ) {
+            wp_send_json_error( ['message' => 'Data inválida.'] );
+        }
+
+        $service = BarberPro_Database::get_service( (int) $booking->service_id );
+        $dur     = $service ? (int) ( $service->duration_minutes ?? $service->duration ?? 30 ) : 30;
+        $slots   = BarberPro_Bookings::get_available_slots( (int) $booking->professional_id, $new_date, $dur, false );
+        $want    = strlen( $new_time ) >= 5 ? substr( $new_time, 0, 5 ) : $new_time;
+        $picked  = null;
+        foreach ( $slots as $s ) {
+            if ( substr( $s, 0, 5 ) === $want ) {
+                $picked = strlen( $s ) > 5 ? $s : ( $want . ':00' );
+                break;
+            }
+        }
+        if ( ! $picked ) {
+            wp_send_json_error( ['message' => 'Horário não disponível. Escolha outro.'] );
+        }
+        $new_time = $picked;
+
+        BarberPro_Database::update_booking_schedule( $booking_id, $new_date, $new_time );
+        wp_send_json_success( ['message' => 'Agendamento remarcado!'] );
     }
 }

@@ -1147,19 +1147,62 @@ trait BP_Actions_Operations {
     // ── Clientes: Salvar ──────────────────────────────────────
     private function action_save_client(): void {
         $result = BarberPro_Clients::save([
-            'id'               => absint($_POST['id'] ?? 0),
-            'company_id'       => absint($_POST['company_id'] ?? 1),
-            'name'             => sanitize_text_field($_POST['name'] ?? ''),
-            'phone'            => sanitize_text_field($_POST['phone'] ?? ''),
-            'email'            => sanitize_email($_POST['email'] ?? ''),
-            'tipo'             => sanitize_key($_POST['tipo'] ?? 'normal'),
-            'recorrencia_dias' => absint($_POST['recorrencia_dias'] ?? 0),
-            'professional_id'  => absint($_POST['professional_id'] ?? 0),
-            'notes'            => sanitize_textarea_field($_POST['notes'] ?? ''),
+            'id'                  => absint($_POST['id'] ?? 0),
+            'company_id'          => absint($_POST['company_id'] ?? 1),
+            'name'                => sanitize_text_field($_POST['name'] ?? ''),
+            'phone'               => sanitize_text_field($_POST['phone'] ?? ''),
+            'email'               => sanitize_email($_POST['email'] ?? ''),
+            'tipo'                => sanitize_key($_POST['tipo'] ?? 'normal'),
+            'recorrencia_dias'    => absint($_POST['recorrencia_dias'] ?? 0),
+            'recurrence_weekdays' => sanitize_text_field(wp_unslash($_POST['recurrence_weekdays'] ?? '')),
+            'professional_id'     => absint($_POST['professional_id'] ?? 0),
+            'notes'               => sanitize_textarea_field($_POST['notes'] ?? ''),
         ]);
         $result
             ? wp_send_json_success(['id' => $result])
             : wp_send_json_error(['message' => 'Erro ao salvar cliente.']);
+    }
+
+    /** Salva configurações de mensagem de ausência (WhatsApp). */
+    private function action_save_absence_settings(): void {
+        BarberPro_Database::update_setting( 'absence_reminder_active', ! empty($_POST['absence_active']) ? '1' : '0' );
+        BarberPro_Database::update_setting( 'absence_reminder_days', (string) max( 1, absint( $_POST['absence_days'] ?? 30 ) ) );
+        BarberPro_Database::update_setting( 'absence_reminder_msg', sanitize_textarea_field( wp_unslash( $_POST['absence_msg'] ?? '' ) ) );
+        wp_send_json_success();
+    }
+
+    /**
+     * Envio em massa WhatsApp para clientes da carteira (delay entre cada envio).
+     */
+    private function action_client_bulk_whatsapp(): void {
+        $company_id = absint( $_POST['company_id'] ?? 1 );
+        $message    = sanitize_textarea_field( wp_unslash( $_POST['message'] ?? '' ) );
+        $delay      = max( 0, min( 120, absint( $_POST['delay_seconds'] ?? 3 ) ) );
+        if ( $message === '' ) {
+            wp_send_json_error( ['message' => 'Digite a mensagem.'] );
+        }
+        $ids = isset( $_POST['client_ids'] ) ? array_map( 'absint', (array) $_POST['client_ids'] ) : [];
+        $list = BarberPro_Clients::list( $company_id, '', '' );
+        if ( $ids ) {
+            $list = array_values( array_filter( $list, static function ( $c ) use ( $ids ) {
+                return in_array( (int) $c->id, $ids, true );
+            } ) );
+        }
+        $sent = 0;
+        foreach ( $list as $c ) {
+            if ( empty( $c->phone ) ) {
+                continue;
+            }
+            if ( $sent > 0 && $delay > 0 ) {
+                sleep( $delay );
+            }
+            BarberPro_WhatsApp::send( $c->phone, str_replace( '{nome}', $c->name, $message ) );
+            $sent++;
+            if ( $sent >= 80 ) {
+                break;
+            }
+        }
+        wp_send_json_success( ['sent' => $sent] );
     }
 
 

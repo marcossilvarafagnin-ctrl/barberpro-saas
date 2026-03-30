@@ -68,7 +68,7 @@ class BarberPro_OpenAI {
                 [ 'role' => 'user',   'content' => $user_message  ],
             ],
             'max_tokens'  => $max_tok,
-            'temperature' => 0.7,
+            'temperature' => 0.82,
         ]);
 
         $response = wp_remote_post( self::OPENAI_API_URL, [
@@ -130,7 +130,7 @@ class BarberPro_OpenAI {
             'model'       => $model,
             'messages'    => $messages,
             'max_tokens'  => $max_tok,
-            'temperature' => 0.7,
+            'temperature' => 0.82,
         ]);
 
         $response = wp_remote_post( self::OPENAI_API_URL, [
@@ -167,19 +167,24 @@ class BarberPro_OpenAI {
         $custom = BarberPro_Database::get_setting('openai_system_prompt', '');
         if ( $custom ) return self::replace_prompt_vars($custom, $context);
 
-        // Prompt padrão gerado automaticamente com dados do negócio
-        $nome_negocio = BarberPro_Database::get_setting('module_barbearia_name', get_bloginfo('name'));
+        // Prompt padrão gerado automaticamente com dados do negócio (módulo: barbearia=1, lava-car=2)
+        $cid          = (int) ( $context['company_id'] ?? 1 );
+        $cid          = in_array( $cid, [ 1, 2 ], true ) ? $cid : 1;
+        $nome_negocio = $cid === 2
+            ? BarberPro_Database::get_setting('module_lavacar_name', 'Lava-Car')
+            : BarberPro_Database::get_setting('module_barbearia_name', get_bloginfo('name'));
         $agenda_url   = BarberPro_Database::get_setting('booking_page_url', home_url('/agendamento/'));
 
         // Busca serviços disponíveis para contextualizar a IA
-        $servicos = BarberPro_Database::get_services(1);
+        $servicos = BarberPro_Database::get_services( $cid );
         $lista_svc = '';
         foreach ( array_slice($servicos, 0, 8) as $s ) {
-            $lista_svc .= "- {$s->name}: R$ " . number_format($s->price, 2, ',', '.') . " ({$s->duration}min)\n";
+            $dur = (int) ( $s->duration_minutes ?? $s->duration ?? 30 );
+            $lista_svc .= "- {$s->name}: R$ " . number_format( (float) $s->price, 2, ',', '.' ) . " ({$dur}min)\n";
         }
 
-        $profissionais = BarberPro_Database::get_professionals(1);
-        $lista_pro = implode(', ', array_column((array)$profissionais, 'name'));
+        $profissionais = BarberPro_Database::get_professionals( $cid );
+        $lista_pro = implode(', ', array_column( (array) $profissionais, 'name' ) );
 
         $horario_info = BarberPro_Database::get_setting('openai_horario_info', 'Segunda a Sábado, das 9h às 18h');
         $localizacao  = BarberPro_Database::get_setting('bot_msg_localizacao', '');
@@ -190,7 +195,9 @@ class BarberPro_OpenAI {
             $slots_info = "\nHORÁRIOS DISPONÍVEIS (próximos 7 dias):\n" . $context['slots_disponiveis'] . "\n";
         }
 
-        return "Você é o assistente virtual de {$nome_negocio}. Seu papel é ajudar clientes com dúvidas, informações e realizar agendamentos diretamente pelo chat.
+        $hint = ! empty( $context['widget_ia_hint'] ) ? "\nCONTEXTO DO WIDGET: " . $context['widget_ia_hint'] . "\n" : '';
+
+        return "Você é o assistente humano de {$nome_negocio} no chat do site. Fale como uma pessoa atenciosa da recepção — natural, empática, calorosa, nunca robótica. Varie um pouco o jeito de cumprimentar e de responder; evite frases prontas repetidas.
 
 INFORMAÇÕES DO NEGÓCIO:
 - Nome: {$nome_negocio}
@@ -198,18 +205,21 @@ INFORMAÇÕES DO NEGÓCIO:
 " . ($localizacao ? "- Localização: {$localizacao}\n" : '') . "
 SERVIÇOS DISPONÍVEIS:
 {$lista_svc}
-" . ($lista_pro ? "PROFISSIONAIS: {$lista_pro}\n" : '') . $slots_info . "
+" . ($lista_pro ? "PROFISSIONAIS / EQUIPE: {$lista_pro}\n" : '') . $slots_info . "
 LINK DE AGENDAMENTO: {$agenda_url}
+{$hint}
+TOM:
+- Português do Brasil, informal mas respeitoso (\"você\"), com leve calor humano
+- Emojis com moderação (no máximo 1–2 por mensagem quando fizer sentido)
+- Se o cliente estiver ansioso ou com pressa, seja objetiva e acolhedora
+- Se estiver descontraído, pode espelhar levemente o tom (sem exageros)
 
-INSTRUÇÕES:
-- Responda sempre em português brasileiro, de forma simpática e profissional
-- Seja conciso (máximo 3 parágrafos)
-- Quando o cliente quiser agendar, informe os horários disponíveis listados acima e pergunte qual prefere
-- Ao confirmar um agendamento, direcione para o link: {$agenda_url}
-- Não invente horários — use apenas os listados em HORÁRIOS DISPONÍVEIS
-- Não invente informações que não foram fornecidas
-- Se não souber responder, sugira que o cliente entre em contato diretamente
-- Use emojis com moderação para deixar a conversa mais amigável";
+REGRAS:
+- Máximo 3 parágrafos curtos por resposta
+- Não invente horários — só os listados em HORÁRIOS DISPONÍVEIS
+- Não invente preços ou serviços que não estão na lista
+- Para agendar, guie com clareza e, se faltar dado, pergunte com gentileza
+- Se não souber, diga com honestidade e ofereça o contato ou o link {$agenda_url}";
     }
 
     private static function replace_prompt_vars( string $prompt, array $context ): string {

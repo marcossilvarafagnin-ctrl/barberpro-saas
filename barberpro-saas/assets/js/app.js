@@ -234,6 +234,7 @@ const BP = {
       { id:'bar_comandas', icon:'🧾', label:'Comandas'      },
       { id:'bar_produtos', icon:'📦', label:'Produtos'      },
       { id:'bar_estoque',  icon:'📈', label:'Estoque'       },
+      { id:'bar_clientes', icon:'👥', label:'Clientes'       },
     ]});
     items.push({ title: 'Sistema', items: [
       { id:'licenca',   icon:'🔑', label:'Licença'         },

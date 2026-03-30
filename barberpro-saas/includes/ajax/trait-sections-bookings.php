@@ -134,16 +134,25 @@ trait BP_Sections_Bookings {
         $mod_name = BarberPro_Database::get_setting("module_{$mod}_name", $company_id===1?'Barbearia':'Lava-Car');
         $icon = $company_id===1?'✂️':'🚗';
         $today = current_time('Y-m-d');
+        $kanban_date = sanitize_text_field( wp_unslash( $_POST['kanban_date'] ?? '' ) );
+        if ( ! $kanban_date || ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $kanban_date ) ) {
+            $kanban_date = $today;
+        }
+        $range_end = gmdate( 'Y-m-d', strtotime( $kanban_date . ' +60 days' ) );
 
         $columns = ['agendado'=>'Aguardando','confirmado'=>'Confirmado','em_atendimento'=>'Em atendimento','finalizado'=>'Finalizado'];
-        $bookings = $wpdb->get_results($wpdb->prepare(
+        // Inclui agendamentos futuros (ex.: widget) no período — antes só aparecia o dia "hoje"
+        $bookings = $wpdb->get_results( $wpdb->prepare(
             "SELECT b.*, p.name AS pro_name, s.name AS svc_name
              FROM {$wpdb->prefix}barber_bookings b
              LEFT JOIN {$wpdb->prefix}barber_professionals p ON b.professional_id=p.id
              LEFT JOIN {$wpdb->prefix}barber_services s ON b.service_id=s.id
-             WHERE b.company_id=%d AND b.booking_date=%s AND b.status != 'cancelado'
-             ORDER BY b.booking_time ASC", $company_id, $today
-        )) ?: [];
+             WHERE b.company_id=%d AND b.booking_date >= %s AND b.booking_date <= %s AND b.status != 'cancelado'
+             ORDER BY b.booking_date ASC, b.booking_time ASC",
+            $company_id,
+            $kanban_date,
+            $range_end
+        ) ) ?: [];
 
         $by_status = [];
         foreach($bookings as $b) $by_status[$b->status][] = $b;
@@ -155,9 +164,15 @@ trait BP_Sections_Bookings {
         <div class="bp-page-header bp-animate-in">
             <div>
                 <div class="bp-page-title"><?php echo $icon; ?> Kanban – <?php echo esc_html($mod_name); ?></div>
-                <div class="bp-page-subtitle"><?php echo date_i18n('d/m/Y'); ?></div>
+                <div class="bp-page-subtitle">A partir de <?php echo esc_html( date_i18n( 'd/m/Y', strtotime( $kanban_date ) ) ); ?> · próx. 60 dias</div>
             </div>
-            <div style="display:flex;align-items:center;gap:10px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <label style="font-size:.78rem;color:var(--text3);display:flex;align-items:center;gap:6px">
+                    📅 Data base
+                    <input type="date" value="<?php echo esc_attr( $kanban_date ); ?>"
+                           onchange="BP.navigate('<?php echo esc_js( $mod ); ?>_kanban',null,{kanban_date:this.value})"
+                           style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);font-size:.8rem">
+                </label>
                 <?php if($auto_enabled): ?>
                 <span style="font-size:.75rem;background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.3);border-radius:20px;padding:4px 12px;font-weight:700">
                     🤖 Automação ativa
@@ -197,6 +212,7 @@ trait BP_Sections_Bookings {
                     <div class="bp-kanban-card">
                         <div class="bp-kanban-card-title"><?php echo esc_html($b->client_name); ?></div>
                         <div class="bp-kanban-card-meta">
+                            <span>📅 <?php echo esc_html( date_i18n( 'd/m', strtotime( $b->booking_date ) ) ); ?></span>
                             <span>⏰ <?php echo esc_html(substr($b->booking_time??'',0,5)); ?></span>
                             <?php if($b->svc_name): ?><span>✂️ <?php echo esc_html($b->svc_name); ?></span><?php endif; ?>
                             <?php if($b->pro_name): ?><span>👤 <?php echo esc_html($b->pro_name); ?></span><?php endif; ?>

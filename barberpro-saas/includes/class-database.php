@@ -262,6 +262,53 @@ class BarberPro_Database {
         );
     }
 
+    /**
+     * Atualiza data/horário do agendamento (ex.: remarcação pelo cliente).
+     */
+    public static function update_booking_schedule( int $id, string $date, string $time ): bool {
+        global $wpdb;
+        return (bool) $wpdb->update(
+            "{$wpdb->prefix}barber_bookings",
+            [
+                'booking_date' => sanitize_text_field( $date ),
+                'booking_time' => sanitize_text_field( $time ),
+                'updated_at'   => current_time( 'mysql' ),
+            ],
+            [ 'id' => $id ]
+        );
+    }
+
+    /**
+     * Lista agendamentos do cliente por e-mail ou telefone (painel do cliente).
+     */
+    public static function get_bookings_for_client( string $email, string $phone = '' ): array {
+        global $wpdb;
+        $email = sanitize_email( $email );
+        $phone = preg_replace( '/\D/', '', $phone );
+        if ( ! $email && ! $phone ) {
+            return [];
+        }
+        $sql    = "SELECT b.*, s.name AS service_name, p.name AS professional_name
+                   FROM {$wpdb->prefix}barber_bookings b
+                   LEFT JOIN {$wpdb->prefix}barber_services s ON b.service_id = s.id
+                   LEFT JOIN {$wpdb->prefix}barber_professionals p ON b.professional_id = p.id
+                   WHERE b.status NOT IN ('recusado')";
+        $params = [];
+        if ( $email && $phone ) {
+            $sql .= ' AND (b.client_email = %s OR REPLACE(REPLACE(REPLACE(REPLACE(b.client_phone," ",""),"-",""),"(",""),")","") LIKE %s)';
+            $params[] = $email;
+            $params[] = '%' . $wpdb->esc_like( $phone ) . '%';
+        } elseif ( $email ) {
+            $sql     .= ' AND b.client_email = %s';
+            $params[] = $email;
+        } else {
+            $sql     .= ' AND REPLACE(REPLACE(REPLACE(REPLACE(b.client_phone," ",""),"-",""),"(",""),")","") LIKE %s';
+            $params[] = '%' . $wpdb->esc_like( $phone ) . '%';
+        }
+        $sql .= ' ORDER BY b.booking_date DESC, b.booking_time DESC';
+        return $wpdb->get_results( $wpdb->prepare( $sql, $params ) ) ?: [];
+    }
+
     public static function get_booked_slots( int $professional_id, string $date ): array {
         global $wpdb;
         return $wpdb->get_col(

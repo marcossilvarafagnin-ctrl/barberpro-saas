@@ -192,6 +192,7 @@ trait BP_Sections_Loja {
             <div>
                 <div class="bp-page-title">📦 Loja — Pedidos <small style="font-size:.6em;opacity:.7"><?php echo $mod; ?></small></div>
                 <div class="bp-page-subtitle">Gerencie os pedidos recebidos pela loja virtual</div>
+                <p style="font-size:.72rem;color:var(--text3);margin:8px 0 0;max-width:52rem">WhatsApp em massa e ausência automática usam a <strong>Carteira de Clientes</strong> (<?php echo $cid === 1 ? 'Barbearia' : 'Lava-Car'; ?>): cadastre o telefone na carteira para incluir nos disparos.</p>
             </div>
         </div>
 

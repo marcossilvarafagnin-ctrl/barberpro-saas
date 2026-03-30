@@ -273,6 +273,7 @@ class BarberPro_App_Ajax {
             case 'bar_estoque':        $this->section_bar_estoque(); break;
             case 'bar_caixa':          $this->section_bar_caixa(); break;
             case 'bar_admin':          $this->section_bar_admin($tab); break;
+            case 'bar_clientes':       $this->section_clientes( BarberPro_Modules::company_id( 'bar' ) ); break;
             case 'barbearia_clientes':      $this->section_clientes(1); break;
             case 'lavacar_clientes':         $this->section_clientes(2); break;
             case 'barbearia_loja_produtos': $this->section_loja_produtos(1); break;
@@ -352,6 +353,8 @@ class BarberPro_App_Ajax {
             case 'backup_auto_save':      $this->action_backup_auto_save();      break;
             case 'backup_delete':         $this->action_backup_delete();         break;
             case 'save_client':           $this->action_save_client();           break;
+            case 'save_absence_settings': $this->action_save_absence_settings(); break;
+            case 'client_bulk_whatsapp':  $this->action_client_bulk_whatsapp();  break;
             case 'get_loja_produto_form': $this->action_get_loja_produto_form(); break;
             case 'save_loja_produto':     $this->action_save_loja_produto();     break;
             case 'get_loja_pedido_detalhe': $this->action_get_loja_pedido_detalhe(); break;

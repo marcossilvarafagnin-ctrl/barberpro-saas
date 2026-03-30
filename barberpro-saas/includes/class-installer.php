@@ -607,6 +607,12 @@ class BarberPro_Installer {
         if ( ! in_array( 'wp_user_id', $cols_clients, true ) ) {
             $wpdb->query( "ALTER TABLE {$p}barber_clients ADD COLUMN wp_user_id BIGINT UNSIGNED DEFAULT NULL AFTER next_reminder" );
         }
+        if ( ! in_array( 'recurrence_weekdays', $cols_clients, true ) ) {
+            $wpdb->query( "ALTER TABLE {$p}barber_clients ADD COLUMN recurrence_weekdays VARCHAR(32) DEFAULT NULL AFTER recorrencia_dias" );
+        }
+        if ( ! in_array( 'last_absence_sent', $cols_clients, true ) ) {
+            $wpdb->query( "ALTER TABLE {$p}barber_clients ADD COLUMN last_absence_sent DATE DEFAULT NULL AFTER recurrence_weekdays" );
+        }
 
         // client_slot_interval e avg_return_days em professionals
         $cols = $wpdb->get_col( "SHOW COLUMNS FROM {$p}barber_professionals" );

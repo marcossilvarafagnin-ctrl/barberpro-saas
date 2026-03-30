@@ -253,7 +253,9 @@ trait BP_Sections_Bar {
         <div class="bp-page-header bp-animate-in">
             <div>
                 <div class="bp-page-title">🍺 Caixa – Bar/Eventos</div>
-                <div class="bp-page-subtitle"><?php echo date_i18n('l, d/m/Y – H:i'); ?></div>
+                <div class="bp-page-subtitle"><?php echo date_i18n('l, d/m/Y – H:i'); ?>
+                    <span style="display:block;font-size:.72rem;color:var(--text3);margin-top:6px;font-weight:400">Fidelização por WhatsApp (ausência e envio em massa) fica em <strong>Clientes</strong> no menu do Bar — a carteira é separada das comandas.</span>
+                </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
                 <?php if(!empty($low_stock)): ?>

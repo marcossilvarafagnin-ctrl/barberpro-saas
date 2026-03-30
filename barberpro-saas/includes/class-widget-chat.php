@@ -272,6 +272,9 @@ class BarberPro_Widget_Chat {
             case 'escolher_horario':
                 $resposta = self::etapa_horario($session, $msg, $estado);
                 break;
+            case 'escolher_momento_pagamento':
+                $resposta = self::etapa_momento_pagamento_widget($session, $msg, $estado);
+                break;
             case 'escolher_pagamento':
                 $resposta = self::etapa_escolher_pagamento_widget($session, $msg, $estado);
                 break;
@@ -326,10 +329,17 @@ class BarberPro_Widget_Chat {
         $resposta_ia = null;
         if ( class_exists('BarberPro_OpenAI') && BarberPro_OpenAI::is_enabled() ) {
             $slots_context = self::build_slots_context();
-            $context       = [
+            $mod_key       = $e['modulo'] ?? '';
+            if ( $mod_key === '' ) {
+                $mods_m = self::get_modulos();
+                $mod_key = array_key_first($mods_m) ?: 'barbearia';
+            }
+            $cid_ctx = $mod_key === 'lavacar' ? 2 : 1;
+            $context = [
                 'nome'              => $e['nome'] ?? '',
                 'celular'           => $e['celular'] ?? '',
                 'slots_disponiveis' => $slots_context,
+                'company_id'        => $cid_ctx,
             ];
             if ( $slot_merge ) {
                 $context['widget_ia_hint'] = 'O cliente escolheu uma data com horários livres no sistema. Responda em 1–2 frases, de forma acolhedora. Não liste horários no texto — eles aparecerão como botões abaixo da mensagem.';
@@ -338,7 +348,12 @@ class BarberPro_Widget_Chat {
         }
 
         if ( ! $resposta_ia ) {
-            $resposta_ia = "Desculpe, não consegui processar sua mensagem agora 😅\n\nPosso te ajudar a agendar pelo nosso formulário 😊";
+            $fallbacks = [
+                'Oi! Estou por aqui sim 😊 Em que posso te ajudar hoje?',
+                'Opa, recebi sua mensagem! Me conta: quer agendar um horário ou tirar uma dúvida?',
+                'Olha só, tive um probleminha técnico agora, mas não some não — quer tentar de novo ou prefere ir direto no agendamento?',
+            ];
+            $resposta_ia = $fallbacks[ array_rand( $fallbacks ) ];
         }
 
         $assistant_visible = $resposta_ia;
@@ -594,34 +609,89 @@ class BarberPro_Widget_Chat {
                     'etapa'   => 'confirmar', 'quick_replies' => ['Sim, confirmar','Não, cancelar','Mudar data']];
         }
 
-        // Sempre pergunta forma de pagamento (presencial + online se houver gateway)
+        // Sem formas de pagamento configuradas no painel: confirma direto + WhatsApp (via create_booking / notificações)
+        if ( function_exists('bp_has_any_payment_method_configured') && ! bp_has_any_payment_method_configured() ) {
+            $e['payment_method'] = 'dinheiro';
+            return self::concluir_agendamento($session, $e);
+        }
+
         $gateways = class_exists('BarberPro_Payment') ? BarberPro_Payment::get_active_gateways() : [];
         $when     = BarberPro_Database::get_setting('online_payment_when','optional');
-        $metodos  = function_exists('bp_get_payment_methods') ? bp_get_payment_methods() : ['presencial' => '💵 No atendimento'];
+        $has_online = ! empty($gateways) && $when !== 'disabled';
 
-        // Se pagamento online desativado E só há 1 método presencial → conclui direto
-        $skip_payment = ( empty($gateways) || $when === 'disabled' ) && count($metodos) <= 1;
+        // Primeiro: perguntar se paga no local ou agora (alinha ao fluxo humano do WhatsApp)
+        $e['etapa']              = 'escolher_momento_pagamento';
+        $e['pay_only_online']    = false;
+        $e['pay_timing']         = '';
+        self::set_estado($session, $e);
 
-        if ( ! $skip_payment ) {
-            $e['etapa'] = 'escolher_pagamento';
+        if ( $has_online ) {
+            return [
+                'message'       => "Show! ✨ Só uma coisa sobre o *pagamento*: você prefere *pagar no salão no dia* do atendimento ou *garantir agora* pelo celular (PIX/cartão)?",
+                'etapa'         => 'escolher_momento_pagamento',
+                'quick_replies' => ['No salão, no dia', 'Agora pelo celular'],
+            ];
+        }
+
+        return [
+            'message'       => "Perfeito! O pagamento fica *no local*, no dia do atendimento, tudo bem? 😊",
+            'etapa'         => 'escolher_momento_pagamento',
+            'quick_replies' => ['Sim, pagamento no local'],
+        ];
+    }
+
+    /**
+     * Cliente escolhe pagar no dia ou agora (online).
+     */
+    private static function etapa_momento_pagamento_widget( string $session, string $msg, array $e ): array {
+        $gateways = class_exists('BarberPro_Payment') ? BarberPro_Payment::get_active_gateways() : [];
+        $when     = BarberPro_Database::get_setting('online_payment_when','optional');
+        $has_online = ! empty($gateways) && $when !== 'disabled';
+        $ml       = mb_strtolower(trim($msg));
+        $metodos  = function_exists('bp_get_payment_methods') ? bp_get_payment_methods() : ['dinheiro' => '💵 Dinheiro'];
+
+        if ( ! $has_online ) {
+            $first = array_key_first($metodos) ?: 'dinheiro';
+            $e['payment_method'] = $first;
+            self::set_estado($session, $e);
+            return self::concluir_agendamento($session, $e);
+        }
+
+        $quer_online = str_contains($ml, 'celular') || str_contains($ml, 'agora') || str_contains($ml, 'online')
+            || str_contains($ml, 'pix') || str_contains($ml, 'cartão') || str_contains($ml, 'cartao')
+            || str_contains($ml, '2') || str_contains($ml, 'garantir');
+        $quer_local  = str_contains($ml, 'local') || str_contains($ml, 'salão') || str_contains($ml, 'salao')
+            || str_contains($ml, 'dia') || str_contains($ml, '1') || str_contains($ml, 'atendimento');
+
+        if ( $quer_online && ! $quer_local ) {
+            $e['pay_only_online'] = true;
+            $e['etapa']           = 'escolher_pagamento';
             self::set_estado($session, $e);
             $qr = [];
             $i  = 1;
-            if ( ! empty($gateways) && $when !== 'disabled' ) {
-                foreach ($gateways as $key => $label) { $qr[] = "{$i}. {$label}"; $i++; }
-            }
-            if ( empty($gateways) || $when !== 'required' ) {
-                foreach ($metodos as $key => $label) { $qr[] = "{$i}. {$label}"; $i++; }
+            foreach ($gateways as $key => $label) {
+                $qr[] = "{$i}. {$label}";
+                $i++;
             }
             return [
-                'message'       => self::mensagem_pagamento_ia($e),
+                'message'       => self::mensagem_pagamento_ia($e) . "\n\nEscolha como quer pagar agora:",
                 'etapa'         => 'escolher_pagamento',
                 'quick_replies' => $qr,
             ];
         }
 
-        $e['payment_method'] = array_key_first($metodos) ?? 'presencial';
-        return self::concluir_agendamento($session, $e);
+        if ( $quer_local || ! $quer_online ) {
+            $first = array_key_first($metodos) ?: 'dinheiro';
+            $e['payment_method'] = $first;
+            self::set_estado($session, $e);
+            return self::concluir_agendamento($session, $e);
+        }
+
+        return [
+            'message'       => 'Não entendi 😅 Você prefere *pagar no salão no dia* ou *agora pelo celular*?',
+            'etapa'         => 'escolher_momento_pagamento',
+            'quick_replies' => ['No salão, no dia', 'Agora pelo celular'],
+        ];
     }
 
     private static function etapa_escolher_pagamento_widget( string $session, string $msg, array $e ): array {
@@ -630,13 +700,32 @@ class BarberPro_Widget_Chat {
         $metodos  = function_exists('bp_get_payment_methods') ? bp_get_payment_methods() : ['presencial' => '💵 No atendimento'];
         $ml       = mb_strtolower(trim($msg));
 
-        // Monta lista unificada de opções (mesma da mensagem)
+        // Monta lista: só gateways se cliente já escolheu "pagar agora"
         $opcoes = [];
-        if ( ! empty($gateways) && $when !== 'disabled' ) {
-            foreach ( $gateways as $key => $label ) $opcoes[$key] = $label;
-        }
-        if ( empty($gateways) || $when !== 'required' ) {
-            foreach ( $metodos as $key => $label ) $opcoes[$key] = $label;
+        if ( ! empty($e['pay_only_online']) ) {
+            if ( ! empty($gateways) && $when !== 'disabled' ) {
+                foreach ( $gateways as $key => $label ) {
+                    $opcoes[ $key ] = $label;
+                }
+            }
+            if ( empty($opcoes) ) {
+                $first = array_key_first($metodos) ?: 'dinheiro';
+                $e['payment_method'] = $first;
+                $e['pay_only_online'] = false;
+                self::set_estado($session, $e);
+                return self::concluir_agendamento($session, $e);
+            }
+        } else {
+            if ( ! empty($gateways) && $when !== 'disabled' ) {
+                foreach ( $gateways as $key => $label ) {
+                    $opcoes[ $key ] = $label;
+                }
+            }
+            if ( empty($gateways) || $when !== 'required' ) {
+                foreach ( $metodos as $key => $label ) {
+                    $opcoes[ $key ] = $label;
+                }
+            }
         }
         $keys = array_keys($opcoes);
 
