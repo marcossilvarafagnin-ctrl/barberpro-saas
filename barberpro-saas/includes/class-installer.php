@@ -14,6 +14,9 @@ class BarberPro_Installer {
         BarberPro_Roles::create_roles();
         self::create_default_company();
         self::seed_expense_categories();
+        if ( class_exists( 'BarberPro_Custom_Overrides' ) ) {
+            BarberPro_Custom_Overrides::ensure_dirs();
+        }
         update_option( 'barberpro_db_version', BARBERPRO_DB_VERSION );
         self::seed_vehicle_variants();
         flush_rewrite_rules();
@@ -32,6 +35,9 @@ class BarberPro_Installer {
             self::create_tables();
             self::seed_expense_categories();
             self::seed_vehicle_variants();
+            if ( class_exists( 'BarberPro_Custom_Overrides' ) ) {
+                BarberPro_Custom_Overrides::ensure_dirs();
+            }
             update_option( 'barberpro_db_version', BARBERPRO_DB_VERSION );
         }
         // Garante sempre estrutura básica e permissões, independente de versão
@@ -562,6 +568,9 @@ class BarberPro_Installer {
     public static function maybe_migrate(): void {
         global $wpdb;
         $p = $wpdb->prefix;
+        if ( class_exists( 'BarberPro_Custom_Overrides' ) ) {
+            BarberPro_Custom_Overrides::ensure_dirs();
+        }
 
         // ── barber_products: colunas da loja (photo, weight_g, shop_active) ──
         $prod_cols = $wpdb->get_col( "SHOW COLUMNS FROM {$p}barber_products" );

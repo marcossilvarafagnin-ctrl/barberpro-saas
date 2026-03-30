@@ -42,6 +42,7 @@ require_once BARBERPRO_PLUGIN_DIR . 'includes/class-whatsapp-bot.php';
 require_once BARBERPRO_PLUGIN_DIR . 'includes/class-widget-chat.php';
 require_once BARBERPRO_PLUGIN_DIR . 'includes/class-app-ajax.php';
 require_once BARBERPRO_PLUGIN_DIR . 'includes/class-bulk-whatsapp.php';
+require_once BARBERPRO_PLUGIN_DIR . 'includes/class-custom-overrides.php';
 
 register_activation_hook(   __FILE__, [ 'BarberPro_Installer', 'activate' ] );
 register_deactivation_hook( __FILE__, [ 'BarberPro_Installer', 'deactivate' ] );
@@ -95,6 +96,7 @@ final class BarberPro_SaaS {
         // Frontend: shortcodes só funcionam com licença ativa
         $frontend = new BarberPro_Frontend();
 new BarberPro_App_Ajax();
+        BarberPro_Custom_Overrides::init(); // customizações persistentes em uploads
         if ( BarberPro_License::is_active() ) {
             $frontend->register_shortcodes();
             add_action( 'rest_api_init', [ 'BarberPro_API', 'register_routes' ] );
